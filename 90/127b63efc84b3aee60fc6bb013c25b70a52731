@@ -1,0 +1,21 @@
+backend/apps/finance/migrations/0001_initial.py
+  s_3d75eaefadff5b::t_627e5ce9e197eb 1-500
+backend/apps/finance/migrations/0002_transaction_provider_category.py
+  s_3d75eaefadff5b::t_acbc85c6d5242b 1-18
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "90127b63efc84b3aee60fc6bb013c25b70a52731",
+  "prompts": {},
+  "sessions": {
+    "s_3d75eaefadff5b": {
+      "agent_id": {
+        "tool": "github-copilot-cli",
+        "id": "3646ac61-0d03-4eaf-b636-ffb2be23f907",
+        "model": "auto"
+      },
+      "human_author": "Ryan Leite Albuquerque <ryan_albuquerque@apple.com>"
+    }
+  }
+}
