@@ -16,3 +16,4 @@ coverage/
 venv/
 backend/staticfiles/
 backend/media/
+tmp

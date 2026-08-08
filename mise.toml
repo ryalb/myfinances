@@ -10,13 +10,20 @@ PYTHONPATH = "backend"
 [tasks.setup]
 description = "Install backend and frontend dependencies"
 run = [
+  "cd backend && docker compose up -d --force-recreate --remove-orphans",
   "cd backend && uv sync --group dev",
   "cd frontend && bun install",
 ]
 
 [tasks.backend-dev]
-description = "Run Django API"
-run = "cd backend && uv run python manage.py runserver"
+description = "Run Django API via Daphne (ASGI/WebSocket)"
+# `ngrok` NAO pode entrar aqui: `depends` espera a task terminar, e
+# `ngrok start --all` nunca termina -- o daphne nunca subiria.
+# Rode o tunel em paralelo: `mise run backend-dev ::: ngrok`
+depends = ["backend-migrate", "kill-port 8000"]
+run = "cd backend && uv run daphne config.asgi:application --port 8000"
+# output = "interleave"
+env = { FORCE_COLOR = "1", RichTraceback_color_system = "true" }
 
 [tasks.backend-migrate]
 description = "Run Django migrations"
@@ -40,11 +47,13 @@ run = "cd backend && uv run ty check . --ignore unresolved-attribute --ignore un
 
 [tasks.backend-test]
 description = "Run backend tests"
-run = "cd backend && uv run python manage.py test"
+run = "cd backend && uv run pytest"
 
 [tasks.frontend-dev]
+depends = ["kill-port 3000"]
 description = "Run Nuxt dev server"
 run = "cd frontend && bun run dev"
+output = "interleave"
 
 [tasks.frontend-build]
 description = "Build frontend"
@@ -58,6 +67,93 @@ run = "cd frontend && bun run lint"
 description = "Run ESLint with fixes"
 run = "cd frontend && bun run lint:fix"
 
+[tasks.ngrok]
+description = "Start ngrok with all configured tunnels"
+run = "ngrok start --all"
+
+[tasks.kill-port]
+description = "Kill all processes on a given port"
+run = "sh -c 'lsof -ti :$1 | xargs kill -9 2>/dev/null || true' dummy $1"
+
+[tasks.db-backup]
+description = "Dump the Postgres database to tmp/backups/ (custom format, restorable)"
+run = """
+sh -c '
+set -e
+cd backend
+set -a; . ./.env; set +a
+mkdir -p ../tmp/backups
+OUT="../tmp/backups/myfinances-$(date +%Y%m%d-%H%M%S).dump"
+docker exec -e PGPASSWORD="$POSTGRES_PASSWORD" myfinances-db-1 \
+  pg_dump -Fc -U "$POSTGRES_USER" -d "$POSTGRES_DB" > "$OUT"
+TABLES=$(docker exec -i myfinances-db-1 pg_restore -l < "$OUT" 2>/dev/null | grep -c "TABLE DATA" || true)
+echo "backup: $(cd .. && pwd)/${OUT#../}"
+echo "        $(du -h "$OUT" | cut -f1), ${TABLES} tabelas com dados"
+'
+"""
+
+[tasks.db-backups]
+description = "List available database backups (newest first)"
+run = "sh -c 'ls -lht tmp/backups/*.dump 2>/dev/null || echo \"Nenhum backup em tmp/backups/. Rode: mise run db-backup\"'"
+
+[tasks.db-restore]
+description = "Restore the database from a dump. Usage: mise run db-restore <arquivo.dump>"
+run = """
+sh -c '
+set -e
+DUMP="$1"
+if [ -z "$DUMP" ]; then
+  echo "Uso: mise run db-restore <arquivo.dump>"
+  echo "Disponiveis:"
+  ls -1t tmp/backups/*.dump 2>/dev/null | sed "s/^/  /" || echo "  (nenhum)"
+  exit 1
+fi
+if [ ! -f "$DUMP" ]; then echo "Arquivo nao encontrado: $DUMP"; exit 1; fi
+cd backend
+set -a; . ./.env; set +a
+cd ..
+echo "ATENCAO: isto SOBRESCREVE o banco \"$POSTGRES_DB\" com $DUMP"
+printf "Digite RESTORE para confirmar: "
+read CONFIRM
+[ "$CONFIRM" = "RESTORE" ] || { echo "Abortado."; exit 1; }
+docker exec -i -e PGPASSWORD="$POSTGRES_PASSWORD" myfinances-db-1 \
+  pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists --no-owner < "$DUMP"
+echo "Restaurado de $DUMP"
+' dummy $1
+"""
+
+[tasks.db-reset]
+description = "DROP and recreate the database, then run migrations from scratch"
+run = """
+sh -c '
+set -e
+cd backend
+set -a; . ./.env; set +a
+cd ..
+echo "ATENCAO: isto APAGA o banco \"$POSTGRES_DB\" por completo (schema + dados)."
+echo "Um backup sera feito antes, em tmp/backups/."
+printf "Digite RESET para confirmar: "
+read CONFIRM
+[ "$CONFIRM" = "RESET" ] || { echo "Abortado."; exit 1; }
+
+mise run db-backup
+
+echo "--- encerrando conexoes abertas com o banco ---"
+docker exec -e PGPASSWORD="$POSTGRES_PASSWORD" myfinances-db-1 \
+  psql -U "$POSTGRES_USER" -d postgres -c \
+  "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '"'"'$POSTGRES_DB'"'"' AND pid <> pg_backend_pid();" >/dev/null
+
+echo "--- recriando o banco ---"
+docker exec -e PGPASSWORD="$POSTGRES_PASSWORD" myfinances-db-1 \
+  psql -U "$POSTGRES_USER" -d postgres -c "DROP DATABASE IF EXISTS $POSTGRES_DB;"
+docker exec -e PGPASSWORD="$POSTGRES_PASSWORD" myfinances-db-1 \
+  psql -U "$POSTGRES_USER" -d postgres -c "CREATE DATABASE $POSTGRES_DB OWNER $POSTGRES_USER;"
+
+echo "--- rodando migrations do zero ---"
+cd backend && uv run python manage.py migrate
+'
+"""
+
 [tasks.check]
 description = "Run lint + typecheck + tests"
 run = [
@@ -67,8 +163,8 @@ run = [
   "mise run frontend-lint",
 ]
 [tasks.dev]
-description = "Run dev server"
-run = [
-  "mise run backend-dev",
-  "mise run frontend-dev",
-]
+description = "Run the full dev stack in parallel (API, worker, frontend, tunnel)"
+depends = ["setup"]
+# `:::` roda em paralelo. Uma lista em `run` seria sequencial, e como cada
+# processo e long-running, o segundo nunca comecaria.
+run = "mise run backend-dev ::: backend-worker ::: frontend-dev ::: ngrok"

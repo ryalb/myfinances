@@ -1,21 +1,13 @@
 export function useNetWorthHistory() {
-  const config = useRuntimeConfig()
-  const token = useCookie<string | null>('access_token')
-  const headers = token.value ? { Authorization: `Bearer ${token.value}` } : {}
+  const { get } = useApi()
 
-  const { data: history, refresh } = useState<{
-    id: number
-    date: string
-    assets: number
-    liabilities: number
-    net_worth: number
-  }[]>('net-worth-history', async () => {
-    try {
-      return await $fetch(`${config.public.apiBaseUrl}/net-worth/snapshot/`, { headers })
-    } catch {
-      return []
-    }
-  })
+  const { data: history, refresh } = useAsyncData(
+    'net-worth-history',
+    async () => {
+      return await get<{ date: string; net_worth: number; assets: number; liabilities: number }[]>(`/net-worth/snapshot/`) || []
+    },
+    { default: () => [] },
+  )
 
   return { history, refresh }
 }

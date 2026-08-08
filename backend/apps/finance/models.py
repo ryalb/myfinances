@@ -201,3 +201,115 @@ class CategorizationRule(TimeStampedModel):
 
     class Meta:
         ordering = ["priority", "-created_at"]
+
+
+class SubscriptionCategory(models.TextChoices):
+    UTILITIES = "utilities", "Utilities"
+    INTERNET = "internet", "Internet"
+    PHONE = "phone", "Phone"
+    STREAMING = "streaming", "Streaming"
+    OTHER = "other", "Other"
+
+
+class SubscriptionStatus(models.TextChoices):
+    PENDING = "pending", "Pending"
+    PAID = "paid", "Paid"
+    OVERDUE = "overdue", "Overdue"
+
+
+class Subscription(TimeStampedModel):
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="subscriptions"
+    )
+    connection = models.ForeignKey(
+        Connection, on_delete=models.CASCADE, related_name="subscriptions", null=True, blank=True
+    )
+    name = models.CharField(max_length=255)
+    category = models.CharField(
+        max_length=50,
+        choices=SubscriptionCategory.choices,
+        default=SubscriptionCategory.OTHER,
+    )
+    amount = models.DecimalField(max_digits=16, decimal_places=2)
+    due_day = models.PositiveSmallIntegerField()
+    payment_account = models.ForeignKey(
+        Account, on_delete=models.SET_NULL, null=True, blank=True, related_name="subscriptions"
+    )
+    is_active = models.BooleanField(default=True)
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class SubscriptionPayment(TimeStampedModel):
+    subscription = models.ForeignKey(
+        Subscription, on_delete=models.CASCADE, related_name="payments"
+    )
+    due_date = models.DateField()
+    paid_date = models.DateField(null=True, blank=True)
+    status = models.CharField(
+        max_length=20, choices=SubscriptionStatus.choices, default=SubscriptionStatus.PENDING
+    )
+    paid_amount = models.DecimalField(max_digits=16, decimal_places=2, null=True, blank=True)
+
+    class Meta:
+        ordering = ["-due_date"]
+        unique_together = ("subscription", "due_date")
+
+
+class DocumentChunkStatus(models.TextChoices):
+    PENDING = "pending", "Pending"
+    INDEXED = "indexed", "Indexed"
+    FAILED = "failed", "Failed"
+
+
+class DocumentChunk(TimeStampedModel):
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="document_chunks"
+    )
+    source_type = models.CharField(max_length=50)
+    source_id = models.CharField(max_length=255)
+    content = models.TextField()
+    metadata = models.JSONField(default=dict, blank=True)
+    status = models.CharField(
+        max_length=20, choices=DocumentChunkStatus.choices, default=DocumentChunkStatus.PENDING
+    )
+    indexed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["user", "source_type", "source_id"]),
+        ]
+
+
+class Embedding(TimeStampedModel):
+    chunk = models.OneToOneField(DocumentChunk, on_delete=models.CASCADE, related_name="embedding")
+    vector = models.JSONField()
+    model = models.CharField(max_length=100, default="text-embedding-3-small")
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["chunk"]),
+        ]
+
+
+class ProcessedWebhookEvent(TimeStampedModel):
+    """Registro de eventId ja processado.
+
+    A Pluggy reentrega webhooks ate 9 vezes; sem isso cada reentrega
+    reprocessaria o evento (refetch e reescrita dos mesmos dados).
+    """
+
+    event_id = models.CharField(max_length=255, unique=True)
+    event = models.CharField(max_length=100)
+    item_id = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["item_id"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.event}:{self.event_id}"

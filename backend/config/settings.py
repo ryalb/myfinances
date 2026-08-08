@@ -1,7 +1,48 @@
+import logging
 import os
+import sys
 from pathlib import Path
 
+from dotenv import load_dotenv
+from rich.console import Console
+from rich.logging import RichHandler
+
+load_dotenv()
+
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+
+class FullWidthRichHandler(RichHandler):
+    def __init__(self, *args, **kwargs):
+        console = Console(
+            width=200,
+            force_terminal=True,
+            stderr=True,
+        )
+        super().__init__(*args, console=console, **kwargs)
+
+
+class StreamToLogger:
+    def __init__(self, logger_name="stdout", level=logging.INFO):
+        self.logger = logging.getLogger(logger_name)
+        self.level = level
+        self._sys_stdout = sys.__stdout__
+
+    def write(self, buf):
+        for line in buf.rstrip().splitlines():
+            cleaned = line.strip()
+            if cleaned:
+                self.logger.log(self.level, cleaned)
+
+    def flush(self):
+        pass
+
+    def isatty(self):
+        return getattr(self._sys_stdout, "isatty", lambda: False)()
+
+    @property
+    def encoding(self):
+        return getattr(self._sys_stdout, "encoding", "utf-8")
 
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "unsafe-dev-key")
 DEBUG = os.getenv("DJANGO_DEBUG", "False").lower() == "true"
@@ -22,6 +63,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "rest_framework.authtoken",
     "graphene_django",
+    "channels",
     "apps.finance.apps.FinanceConfig",
 ]
 
@@ -105,18 +147,49 @@ CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
 
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": [REDIS_URL],
+        },
+    },
+}
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
     "formatters": {
-        "standard": {
-            "format": "%(asctime)s %(levelname)s %(name)s %(message)s",
+        "rich": {
+            "format": "%(message)s",
         },
     },
     "handlers": {
         "console": {
-            "class": "logging.StreamHandler",
-            "formatter": "standard",
+            "class": "config.settings.FullWidthRichHandler",
+            "formatter": "rich",
+        },
+    },
+    "loggers": {
+        "django": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "django.server": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "celery": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "py.warnings": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
         },
     },
     "root": {
@@ -124,3 +197,9 @@ LOGGING = {
         "level": "INFO",
     },
 }
+
+logging.captureWarnings(True)
+
+if "test" not in sys.argv:
+    sys.stdout = StreamToLogger()
+

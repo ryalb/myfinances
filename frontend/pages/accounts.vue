@@ -1,4 +1,11 @@
 <script setup lang="ts">
+import { useUiStore } from '@/stores/ui'
+import { formatBRL } from '@/composables/useCurrency'
+
+definePageMeta({
+  middleware: 'auth',
+})
+
 const config = useRuntimeConfig()
 const token = useCookie<string | null>('access_token')
 const headers = token.value ? { Authorization: `Bearer ${token.value}` } : {}
@@ -23,42 +30,42 @@ const typeLabels: Record<string, string> = {
 }
 
 const typeColors: Record<string, string> = {
-  checking: 'bg-blue-100 text-blue-700',
+  checking: 'bg-sepia-100 text-sepia-700',
   savings: 'bg-emerald-100 text-emerald-700',
-  brokerage: 'bg-violet-100 text-violet-700',
+  brokerage: 'bg-sepia-100 text-sepia-700',
   credit: 'bg-amber-100 text-amber-700',
-  other: 'bg-slate-100 text-slate-600',
+  other: 'bg-sepia-100 text-sepia-600',
 }
 
-const formatBRL = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+const uiStore = useUiStore()
 </script>
 
 <template>
   <section class="space-y-6">
     <h1 class="text-2xl font-semibold">Contas</h1>
 
-    <div v-if="!accounts?.length" class="rounded-lg border border-dashed border-slate-300 p-8 text-center">
-      <Icon icon="mdi:bank-off" class="mx-auto mb-3 h-10 w-10 text-slate-300" />
-      <p class="text-slate-500">Nenhuma conta encontrada.</p>
-      <p class="mt-1 text-sm text-slate-400">Conecte uma instituição para ver suas contas.</p>
+    <div v-if="!accounts?.length" class="rounded-lg border border-dashed border-sepia-300 p-8 text-center">
+      <Icon icon="mdi:bank-off" class="mx-auto mb-3 h-10 w-10 text-sepia-300" />
+      <p class="text-sepia-500">Nenhuma conta encontrada.</p>
+      <p class="mt-1 text-sm text-sepia-400">Conecte uma instituição para ver suas contas.</p>
     </div>
 
     <div v-else class="grid gap-4 md:grid-cols-2">
       <article
         v-for="account in accounts"
         :key="account.id"
-        class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
+        class="rounded-xl border border-sepia-200 bg-white p-5 shadow-sm"
       >
         <div class="flex items-start justify-between">
           <div>
-            <h3 class="font-semibold text-slate-900">{{ account.name }}</h3>
+            <h3 class="font-semibold text-sepia-900">{{ account.name }}</h3>
             <span :class="['mt-1 inline-block rounded-full px-2 py-0.5 text-xs font-medium', typeColors[account.type] || typeColors.other]">
               {{ typeLabels[account.type] || account.type }}
             </span>
           </div>
-          <p class="text-right text-lg font-bold text-slate-900">{{ formatBRL(account.available_balance || account.balance) }}</p>
+          <p :class="['text-right text-lg font-bold text-sepia-900', uiStore.isFinancialValueBlurred ? 'blur-sm select-none' : '']">{{ formatBRL(account.available_balance || account.balance) }}</p>
         </div>
-        <p class="mt-2 text-xs text-slate-400">Saldo disponível: {{ formatBRL(account.available_balance) }}</p>
+        <p :class="['mt-2 text-xs text-sepia-400', uiStore.isFinancialValueBlurred ? 'blur-sm select-none' : '']">Saldo disponível: {{ formatBRL(account.available_balance) }}</p>
       </article>
     </div>
   </section>

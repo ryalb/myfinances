@@ -1,6 +1,6 @@
 services:
   db:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:0.8.6-pg18-trixie
     environment:
       POSTGRES_DB: myfinances
       POSTGRES_USER: myfinances
@@ -8,12 +8,21 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql
 
   redis:
-    image: redis:7-alpine
+    image: redis:8.10.0-alpine3.23
     ports:
       - "6379:6379"
+
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0
 
   # backend:
   #   build:
@@ -32,20 +41,20 @@ services:
   #   volumes:
   #     - ./backend:/app
 
-  worker:
-    build:
-      context: ./backend
-    env_file:
-      - ./backend/.env.example
-    environment:
-      POSTGRES_HOST: db
-      REDIS_URL: redis://redis:6379/0
-    command: celery -A config worker -l info
-    depends_on:
-      - db
-      - redis
-    volumes:
-      - ./backend:/app
+  # worker:
+  #   build:
+  #     context: ./backend
+  #   env_file:
+  #     - ./backend/.env.example
+  #   environment:
+  #     POSTGRES_HOST: db
+  #     REDIS_URL: redis://redis:6379/0
+  #   command: celery -A config worker -l info
+  #   depends_on:
+  #     - db
+  #     - redis
+  #   volumes:
+  #     - ./backend:/app
 
   # frontend:
   #   build:
@@ -62,3 +71,4 @@ services:
 
 volumes:
   postgres_data:
+  ollama_data:

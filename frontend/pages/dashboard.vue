@@ -1,4 +1,10 @@
 <script setup lang="ts">
+import { formatBRL } from '@/composables/useCurrency'
+
+definePageMeta({
+  middleware: 'auth',
+})
+
 const metrics = await useDashboardMetrics()
 const { history: cashFlow } = useCashFlowHistory()
 const { history: netWorthHistory } = useNetWorthHistory()
@@ -11,17 +17,15 @@ const headers = token.value ? { Authorization: `Bearer ${token.value}`, 'Content
 const { data: freedomData } = await useFetch<{ data: { financialFreedomProjection: Record<string, unknown> } }>(
   `${config.public.graphqlEndpoint}`,
   {
-    method: 'POST',
-    headers: { ...headers, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      query: `{ financialFreedomProjection { currentNetWorth monthlySavings averageMonthlyExpenses targetNetWorth estimatedPassiveIncome financialRunwayMonths estimatedRetireDate monthsToFreedom targetReached conservativeMonths baseMonths aggressiveMonths } }`,
-    }),
+  method: 'POST',
+  headers: { ...headers, 'Content-Type': 'application/json' },
+  body: {
+    query: `{ financialFreedomProjection { currentNetWorth monthlySavings averageMonthlyExpenses targetNetWorth estimatedPassiveIncome financialRunwayMonths estimatedRetireDate monthsToFreedom targetReached conservativeMonths baseMonths aggressiveMonths } }`,
+  },
     key: 'dashboard-freedom',
     immediate: false,
   },
 )
-
-const formatBRL = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
 const summaryCards = [
   {
@@ -67,13 +71,13 @@ const summaryCards = [
     <!-- Charts row 1: Net worth evolution + Cash flow -->
     <div class="grid gap-4 lg:grid-cols-2">
       <dashboard-net-worth-chart v-if="netWorthHistory?.length" :data="netWorthHistory" />
-      <div v-else class="rounded-xl border border-slate-200 bg-white p-8 text-center shadow-sm">
-        <p class="text-slate-400">Sem dados históricos suficientes.</p>
+      <div v-else class="rounded-xl border border-sepia-200 bg-white p-8 text-center shadow-sm">
+        <p class="text-sepia-400">Sem dados históricos suficientes.</p>
       </div>
 
       <dashboard-cash-flow-chart v-if="cashFlow?.length" :data="cashFlow" />
-      <div v-else class="rounded-xl border border-slate-200 bg-white p-8 text-center shadow-sm">
-        <p class="text-slate-400">Carregando fluxo de caixa...</p>
+      <div v-else class="rounded-xl border border-sepia-200 bg-white p-8 text-center shadow-sm">
+        <p class="text-sepia-400">Carregando fluxo de caixa...</p>
       </div>
     </div>
 
@@ -104,9 +108,9 @@ const summaryCards = [
         :base-months="(freedomData.data.financialFreedomProjection.baseMonths as number) || 0"
         :aggressive-months="(freedomData.data.financialFreedomProjection.aggressiveMonths as number) || 0"
       />
-      <div v-else class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <h3 class="mb-4 text-lg font-semibold text-slate-900">Liberdade Financeira</h3>
-        <p class="py-8 text-center text-sm text-slate-400">Calcule suas projeções conectando instituições e sincronizando dados.</p>
+      <div v-else class="rounded-xl border border-sepia-200 bg-white p-5 shadow-sm">
+        <h3 class="mb-4 text-lg font-semibold text-sepia-900">Liberdade Financeira</h3>
+        <p class="py-8 text-center text-sm text-sepia-400">Calcule suas projeções conectando instituições e sincronizando dados.</p>
       </div>
     </div>
   </section>

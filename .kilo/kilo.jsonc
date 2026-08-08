@@ -2,5 +2,15 @@
   "$schema": "https://app.kilo.ai/config.json",
   "permission": {
     "bash": "allow"
+  },
+  "mcp": {
+    "pluggy": {
+      "type": "remote",
+      "url": "https://docs.pluggy.ai/mcp",
+      "enabled": true
+    }
+  },
+  "skills": {
+    "paths": ["./.agents/skills"]
   }
 }

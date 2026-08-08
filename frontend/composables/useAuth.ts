@@ -5,13 +5,13 @@ export function useAuth() {
 
   const isAuthenticated = computed(() => !!accessToken.value)
 
-  const login = async (email: string, password: string) => {
+  const login = async (username: string, password: string) => {
     const data = await $fetch<{ access: string; refresh: string }>(
       `${config.public.apiBaseUrl}/auth/token/`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+        body: { username, password },
       },
     )
 
@@ -34,7 +34,7 @@ export function useAuth() {
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ refresh: refreshToken.value }),
+          body: { refresh: refreshToken.value },
         },
       )
       accessToken.value = data.access

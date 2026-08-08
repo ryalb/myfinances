@@ -5,7 +5,16 @@ from django.utils import timezone
 from graphene_django import DjangoObjectType
 
 from .consolidation import build_monthly_cash_flow, build_user_financial_summary
-from .models import Account, FinancialInstitution, NetWorthSnapshot
+from .models import (
+    Account,
+    CategorizationRule,
+    FinancialInstitution,
+    InvestmentPosition,
+    NetWorthSnapshot,
+    PensionPlan,
+    Subscription,
+    SubscriptionPayment,
+)
 
 
 class FinancialInstitutionType(DjangoObjectType):
@@ -69,6 +78,53 @@ class InvestmentDistributionItemType(graphene.ObjectType):
     label = graphene.String()
     value = graphene.Float()
     percentage = graphene.Float()
+
+
+class PensionPlanType(DjangoObjectType):
+    class Meta:
+        model = PensionPlan
+        fields = ("id", "name", "provider", "balance")
+
+
+class InvestmentPositionType(DjangoObjectType):
+    class Meta:
+        model = InvestmentPosition
+        fields = ("id", "investment", "as_of_date", "quantity", "unit_price", "market_value")
+
+
+class SubscriptionType(DjangoObjectType):
+    class Meta:
+        model = Subscription
+        fields = (
+            "id",
+            "name",
+            "category",
+            "amount",
+            "due_day",
+            "is_active",
+            "created_at",
+            "updated_at",
+        )
+
+
+class SubscriptionPaymentType(DjangoObjectType):
+    class Meta:
+        model = SubscriptionPayment
+        fields = (
+            "id",
+            "due_date",
+            "paid_date",
+            "status",
+            "paid_amount",
+            "created_at",
+            "updated_at",
+        )
+
+
+class CategorizationRuleType(DjangoObjectType):
+    class Meta:
+        model = CategorizationRule
+        fields = ("id", "pattern", "category", "priority", "is_active", "created_at", "updated_at")
 
 
 class Query(graphene.ObjectType):
@@ -195,10 +251,13 @@ class Query(graphene.ObjectType):
         avg_monthly_savings = sum(flows) / len(flows) if flows else 0
 
         # Target: 25x annual expenses (4% rule)
-        avg_monthly_expenses = sum(
-            float(build_monthly_cash_flow(user, year=d.year, month=d.month)["expenses"])
-            for d in [now - timedelta(days=30 * i) for i in range(1, 4)]
-        ) / 3
+        avg_monthly_expenses = (
+            sum(
+                float(build_monthly_cash_flow(user, year=d.year, month=d.month)["expenses"])
+                for d in [now - timedelta(days=30 * i) for i in range(1, 4)]
+            )
+            / 3
+        )
         target_net_worth = avg_monthly_expenses * 12 * 25
         estimated_passive_income = target_net_worth * 0.04
         financial_runway_months = (
@@ -245,9 +304,7 @@ class Query(graphene.ObjectType):
                 denom = avg_monthly_savings + net_worth * monthly_r
                 if denom > 0:
                     m = int(
-                        math.log(
-                            (target_net_worth * monthly_r + avg_monthly_savings) / denom
-                        )
+                        math.log((target_net_worth * monthly_r + avg_monthly_savings) / denom)
                         / math.log(1 + monthly_r)
                     )
                     scenario_months[name] = max(0, m)
@@ -278,3 +335,41 @@ class Query(graphene.ObjectType):
             base_months=scenario_months.get("base", 0),
             aggressive_months=scenario_months.get("aggressive", 0),
         )
+
+    def resolve_subscriptions(self, info):
+        user = info.context.user
+        if not user or not user.is_authenticated:
+            return Subscription.objects.none()
+        return Subscription.objects.filter(user=user).order_by("-created_at")
+
+    def resolve_subscription_payments(self, info, subscription_id=None):
+        user = info.context.user
+        if not user or not user.is_authenticated:
+            return SubscriptionPayment.objects.none()
+        qs = SubscriptionPayment.objects.filter(subscription__user=user).order_by("-due_date")
+        if subscription_id:
+            qs = qs.filter(subscription_id=subscription_id)
+        return qs
+
+    def resolve_categorization_rules(self, info):
+        user = info.context.user
+        if not user or not user.is_authenticated:
+            return CategorizationRule.objects.none()
+        return CategorizationRule.objects.filter(user=user).order_by("priority", "-created_at")
+
+    def resolve_pension_plans(self, info):
+        user = info.context.user
+        if not user or not user.is_authenticated:
+            return PensionPlan.objects.none()
+        return PensionPlan.objects.filter(connection__user=user)
+
+    def resolve_investment_positions(self, info, investment_id=None):
+        user = info.context.user
+        if not user or not user.is_authenticated:
+            return InvestmentPosition.objects.none()
+        qs = InvestmentPosition.objects.filter(investment__connection__user=user).order_by(
+            "-as_of_date"
+        )
+        if investment_id:
+            qs = qs.filter(investment_id=investment_id)
+        return qs

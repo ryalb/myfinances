@@ -3,10 +3,17 @@ from rest_framework import serializers
 
 from .models import (
     Account,
+    Card,
+    CategorizationRule,
     Connection,
     FinancialGoal,
     FinancialInstitution,
+    Investment,
+    InvestmentPosition,
     NetWorthSnapshot,
+    PensionPlan,
+    Subscription,
+    SubscriptionPayment,
     SyncJob,
     Transaction,
 )
@@ -19,6 +26,8 @@ class FinancialInstitutionSerializer(serializers.ModelSerializer):
 
 
 class ConnectionSerializer(serializers.ModelSerializer):
+    institution = FinancialInstitutionSerializer(read_only=True)
+
     class Meta:
         model = Connection
         fields = (
@@ -138,8 +147,8 @@ class PluggyConnectTokenRequestSerializer(serializers.Serializer):
 
 
 class PluggyConnectTokenResponseSerializer(serializers.Serializer):
-    access_token = serializers.CharField()
-    expires_at = serializers.CharField(required=False, allow_blank=True)
+    access_token = serializers.CharField(source="accessToken")
+    expires_in = serializers.CharField(required=False, allow_blank=True, source="expiresIn")
 
 
 class FinancialGoalSerializer(serializers.ModelSerializer):
@@ -164,3 +173,121 @@ class FinancialGoalSerializer(serializers.ModelSerializer):
         if obj.target_amount and obj.target_amount > 0:
             return float((obj.current_amount / obj.target_amount) * 100)
         return 0.0
+
+
+class SubscriptionPaymentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SubscriptionPayment
+        fields = (
+            "id",
+            "subscription",
+            "due_date",
+            "paid_date",
+            "status",
+            "paid_amount",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("created_at", "updated_at")
+
+
+class SubscriptionSerializer(serializers.ModelSerializer):
+    payments = SubscriptionPaymentSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Subscription
+        fields = (
+            "id",
+            "connection",
+            "name",
+            "category",
+            "amount",
+            "due_day",
+            "payment_account",
+            "is_active",
+            "payments",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("created_at", "updated_at")
+
+
+class CategorizationRuleSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CategorizationRule
+        fields = (
+            "id",
+            "pattern",
+            "category",
+            "priority",
+            "is_active",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("created_at", "updated_at")
+
+
+class CardSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Card
+        fields = (
+            "id",
+            "connection",
+            "external_id",
+            "name",
+            "last4",
+            "credit_limit",
+            "current_balance",
+            "due_day",
+            "close_day",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("created_at", "updated_at")
+
+
+class InvestmentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Investment
+        fields = (
+            "id",
+            "connection",
+            "external_id",
+            "name",
+            "kind",
+            "currency",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("created_at", "updated_at")
+
+
+class InvestmentPositionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = InvestmentPosition
+        fields = (
+            "id",
+            "investment",
+            "as_of_date",
+            "quantity",
+            "unit_price",
+            "market_value",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("created_at", "updated_at")
+
+
+class PensionPlanSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PensionPlan
+        fields = (
+            "id",
+            "connection",
+            "name",
+            "provider",
+            "balance",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("created_at", "updated_at")

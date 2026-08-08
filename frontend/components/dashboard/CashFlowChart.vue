@@ -22,8 +22,8 @@ const chartData = computed(() => {
 </script>
 
 <template>
-  <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-    <h3 class="mb-4 text-lg font-semibold text-slate-900">Fluxo de Caixa — Últimos 12 Meses</h3>
+  <div class="rounded-xl border border-sepia-200 bg-white p-5 shadow-sm">
+    <h3 class="mb-4 text-lg font-semibold text-sepia-900">Fluxo de Caixa — Últimos 12 Meses</h3>
 
     <div class="mb-4 flex gap-6 text-sm">
         <span class="flex items-center gap-2">
@@ -35,27 +35,27 @@ const chartData = computed(() => {
           Despesas
         </span>
         <span class="flex items-center gap-2">
-          <span class="h-3 w-3 rounded-full bg-blue-500" />
+          <span class="h-3 w-3 rounded-full bg-sepia-400" />
           Poupança
         </span>
     </div>
 
     <div class="flex items-end gap-1.5" style="height: 200px">
       <div v-for="(item, idx) in chartData" :key="idx" class="flex flex-1 flex-col justify-end">
-        <div class="mx-auto mb-1 text-xs text-slate-500">{{ item.savingsRate.toFixed(0) }}%</div>
+        <div class="mx-auto mb-1 text-xs text-sepia-500">{{ item.savingsRate.toFixed(0) }}%</div>
         <div class="space-y-0.5" style="height: 180px">
           <div
             class="w-full rounded-t-sm bg-emerald-500 transition-all"
             :style="{ height: `${item.income}%` }"
-            :title="`Receita: R$ ${item.rawIncome.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`"
+             :title="`Receita: ${formatBRL(item.rawIncome)}`"
           />
           <div
             class="w-full rounded-b-sm bg-rose-500 transition-all"
             :style="{ height: `${item.expenses}%` }"
-            :title="`Despesa: R$ ${item.rawExpenses.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`"
+             :title="`Despesa: ${formatBRL(item.rawExpenses)}`"
           />
         </div>
-        <p class="mt-1 text-center text-xs text-slate-400">{{ item.month }}</p>
+        <p class="mt-1 text-center text-xs text-sepia-400">{{ item.month }}</p>
       </div>
     </div>
   </div>

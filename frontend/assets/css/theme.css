@@ -1,0 +1,31 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-sepia-50: #faf6f1;
+  --color-sepia-100: #f0e6d8;
+  --color-sepia-200: #e0ccb0;
+  --color-sepia-300: #c4a882;
+  --color-sepia-400: #a68b64;
+  --color-sepia-500: #8b7355;
+  --color-sepia-600: #6b5a45;
+  --color-sepia-700: #4a3c2e;
+  --color-sepia-800: #332a20;
+  --color-sepia-900: #1f1a14;
+  --color-sepia-950: #14110c;
+}
+
+body {
+  background-color: #faf6f1;
+  color: #1f1a14;
+  font-family: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+}
+
+a {
+  color: #8b7355;
+}
+
+a:hover {
+  color: #6b5a45;
+}

@@ -1,62 +1,31 @@
 <script setup lang="ts">
-const { isAuthenticated, logout } = useAuth()
+import { useSidebarProvider } from '@/composables/useSidebar'
+import { useRealtimeSync } from '@/composables/useRealtimeSync'
+
+const { isExpanded, isHovered } = useSidebarProvider()
+
+const { isAuthenticated: _isAuthenticated, logout } = useAuth()
+const { connect: _connectRealtime } = useRealtimeSync()
 const router = useRouter()
 
-const handleLogout = () => {
+const _handleLogout = () => {
   logout()
   router.push('/login')
 }
 </script>
 
 <template>
-  <div class="min-h-screen bg-slate-50 text-slate-900">
-    <header class="border-b border-slate-200 bg-white">
-      <nav class="mx-auto flex max-w-6xl items-center gap-1 px-6 py-4">
-        <NuxtLink to="/" class="font-semibold text-lg">MyFinances</NuxtLink>
-        <div v-if="isAuthenticated" class="ml-6 flex gap-1">
-          <NuxtLink
-            to="/dashboard"
-            class="rounded-lg px-3 py-2 text-sm text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-          >
-            Dashboard
-          </NuxtLink>
-          <NuxtLink
-            to="/accounts"
-            class="rounded-lg px-3 py-2 text-sm text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-          >
-            Contas
-          </NuxtLink>
-          <NuxtLink
-            to="/transactions"
-            class="rounded-lg px-3 py-2 text-sm text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-          >
-            Transações
-          </NuxtLink>
-          <NuxtLink
-            to="/integrations"
-            class="rounded-lg px-3 py-2 text-sm text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-          >
-            Integrações
-          </NuxtLink>
-          <NuxtLink
-            to="/goals"
-            class="rounded-lg px-3 py-2 text-sm text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-          >
-            Metas
-          </NuxtLink>
-        </div>
-        <div v-if="isAuthenticated" class="ml-auto">
-          <button
-            class="rounded-lg px-3 py-2 text-sm text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-            @click="handleLogout"
-          >
-            Sair
-          </button>
-        </div>
-      </nav>
-    </header>
-    <main class="mx-auto min-h-screen max-w-6xl px-6 py-8">
-      <slot />
-    </main>
+  <div class="min-h-screen xl:flex bg-sepia-50 text-sepia-900">
+    <LayoutAppSidebar />
+    <LayoutBackdrop />
+    <div
+      class="flex-1 transition-all duration-300 ease-in-out"
+      :class="[isExpanded || isHovered ? 'lg:ml-[290px]' : 'lg:ml-[90px]']"
+    >
+      <LayoutAppHeader />
+      <main class="p-4 mx-auto max-w-(--breakpoint-2xl) md:p-6">
+        <slot />
+      </main>
+    </div>
   </div>
 </template>

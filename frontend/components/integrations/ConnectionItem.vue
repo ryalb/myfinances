@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import Button from 'primevue/button'
 const props = defineProps<{
   connection: {
     id: number
@@ -19,7 +20,7 @@ const statusColors: Record<string, string> = {
   active: 'bg-emerald-100 text-emerald-700',
   pending: 'bg-amber-100 text-amber-700',
   error: 'bg-rose-100 text-rose-700',
-  expired: 'bg-slate-100 text-slate-600',
+  expired: 'bg-sepia-100 text-sepia-600',
 }
 
 const sync = async () => {
@@ -44,19 +45,19 @@ const remove = async () => {
 </script>
 
 <template>
-  <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+  <div class="rounded-xl border border-sepia-200 bg-white p-5 shadow-sm">
     <div class="flex items-start justify-between">
       <div>
-        <h4 class="font-semibold text-slate-900">{{ props.connection.institution.name }}</h4>
-        <p class="mt-1 text-xs text-slate-500">Conectado em {{ new Date(props.connection.created_at).toLocaleDateString('pt-BR') }}</p>
+        <h4 class="font-semibold text-sepia-900">{{ props.connection.institution.name }}</h4>
+        <p class="mt-1 text-xs text-sepia-500">Conectado em {{ new Date(props.connection.created_at).toLocaleDateString('pt-BR') }}</p>
       </div>
-      <span :class="['rounded-full px-2 py-0.5 text-xs font-medium', statusColors[props.connection.status] || 'bg-slate-100 text-slate-600']">
+      <span :class="['rounded-full px-2 py-0.5 text-xs font-medium', statusColors[props.connection.status] || 'bg-sepia-100 text-sepia-600']">
         {{ props.connection.status }}
       </span>
     </div>
 
     <!-- Last synced -->
-    <div v-if="props.connection.last_synced_at" class="mt-3 text-xs text-slate-500">
+    <div v-if="props.connection.last_synced_at" class="mt-3 text-xs text-sepia-500">
       Última sincronização: {{ new Date(props.connection.last_synced_at).toLocaleString('pt-BR') }}
     </div>
 
@@ -67,20 +68,20 @@ const remove = async () => {
 
     <!-- Actions -->
     <div class="mt-4 flex gap-2">
-      <button
+      <Button
         :disabled="syncing"
-        class="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+        class="!rounded-lg !border !border-sepia-200 !px-3 !py-1.5 !text-xs !font-medium !text-sepia-600 hover:!bg-sepia-50 disabled:!opacity-50"
         @click="sync"
       >
         {{ syncing ? 'Sincronizando...' : 'Sincronizar agora' }}
-      </button>
-      <button
+      </Button>
+      <Button
         :disabled="removing"
-        class="rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-medium text-rose-600 hover:bg-rose-50 disabled:opacity-50"
+        class="!rounded-lg !border !border-rose-200 !px-3 !py-1.5 !text-xs !font-medium !text-rose-600 hover:!bg-rose-50 disabled:!opacity-50"
         @click="remove"
       >
         {{ removing ? 'Removendo...' : 'Remover' }}
-      </button>
+      </Button>
     </div>
   </div>
 </template>
