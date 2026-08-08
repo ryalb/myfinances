@@ -1,0 +1,44 @@
+backend/.env.example
+  s_a92f5a3402eb75::t_d3b15269d19198 5-15
+backend/apps/finance/tests/conftest.py
+  s_a92f5a3402eb75::t_d543ce5a233acd 73-93
+backend/apps/finance/middleware.py
+  s_a92f5a3402eb75::t_37454181a8d9ea 25-30,33,35-36,38
+  s_a92f5a3402eb75::t_3f9d546442d799 1-24,31-32,34,37,39-47
+backend/apps/finance/tests/test_public_exposure.py
+  s_a92f5a3402eb75::t_544e6cd42d54fd 1-8,11-21,29-37,39,41-42,44-45,48-50,52-56,58,73-74,77-79,82-84,86-87,89-91,94-99,102-112,115-127,129-133,146,148-154,160-161,178-187
+  s_a92f5a3402eb75::t_f69f654e2427f9 134-135,137-145,147,155-159
+  s_a92f5a3402eb75::t_65ac89ef8072f3 9-10,22-28,38,40,43,46-47,51,57,59-72,75-76,80-81,85,88,92-93,100-101,113-114,128,136,162-177
+backend/apps/finance/views.py
+  s_a92f5a3402eb75::t_d68d240763c3a9 7,13,15
+  s_a92f5a3402eb75::t_4181461f337760 368-371
+  s_a92f5a3402eb75::t_94be699a5c87ca 67,73-83,101-102,105-113
+backend/config/settings.py
+  s_a92f5a3402eb75::t_a275474d49009a 73-74,83-102
+  s_a92f5a3402eb75::t_2c9b532fc1b6a4 156-165
+  s_a92f5a3402eb75::t_26d7cdcb90371c 176-185
+  s_a92f5a3402eb75::t_208542c857d971 103
+mise.toml
+  s_a92f5a3402eb75::t_c9b2ec5e0e8442 103,107-116,118
+  s_a92f5a3402eb75::t_c9016a75ddcd50 80,88,92
+backend/config/urls.py
+  s_a92f5a3402eb75::t_22a39edf951a41 31
+  s_a92f5a3402eb75::t_57e407eba4fc06 5
+  s_a92f5a3402eb75::t_12115282817e3f 67-71
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "9973b63c9bb2db29c8ec2de5892907112b889f1b",
+  "prompts": {},
+  "sessions": {
+    "s_a92f5a3402eb75": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fa8745af-ba2a-4a60-8032-950b53049ee5",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Ryan Leite Albuquerque <ryan_albuquerque@apple.com>"
+    }
+  }
+}
