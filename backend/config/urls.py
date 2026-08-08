@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.urls import include, path
 from graphene_django.views import GraphQLView
 from rest_framework.routers import DefaultRouter
-from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+from rest_framework_simplejwt.views import TokenRefreshView
 
 from apps.finance.views import (
     AccountViewSet,
@@ -28,6 +28,7 @@ from apps.finance.views import (
     SubscriptionPaymentViewSet,
     SubscriptionViewSet,
     SyncJobViewSet,
+    ThrottledTokenObtainPairView,
     TransactionViewSet,
 )
 
@@ -63,7 +64,11 @@ urlpatterns = [
         NetWorthSnapshotAPIView.as_view(),
         name="net-worth-snapshot",
     ),
-    path("api/v1/auth/token/", TokenObtainPairView.as_view(), name="token_obtain_pair"),
+    path(
+        "api/v1/auth/token/",
+        ThrottledTokenObtainPairView.as_view(),
+        name="token_obtain_pair",
+    ),
     path(
         "api/v1/auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"
     ),

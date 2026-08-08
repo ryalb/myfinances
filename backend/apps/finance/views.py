@@ -4,12 +4,15 @@ import os
 from datetime import date as date_type
 from uuid import UUID
 
+from django.conf import settings
 from django.db.models import Q
 from django.utils import timezone
 from rest_framework import permissions, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
+from rest_framework_simplejwt.views import TokenObtainPairView
 
 from .consolidation import (
     build_monthly_cash_flow,
@@ -61,9 +64,21 @@ logger = logging.getLogger(__name__)
 
 class HealthCheckAPIView(APIView):
     permission_classes = [permissions.AllowAny]
+    throttle_classes = []
 
     def get(self, request):
         return Response({"status": "ok"})
+
+
+class ThrottledTokenObtainPairView(TokenObtainPairView):
+    """Login com limite de tentativas.
+
+    O endpoint de token nao tinha throttling nenhum: senha podia ser tentada
+    indefinidamente. A taxa vem de DEFAULT_THROTTLE_RATES["login"].
+    """
+
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "login"
 
 
 class CurrentUserAPIView(APIView):
@@ -83,8 +98,19 @@ class CurrentUserAPIView(APIView):
 
 class RegisterAPIView(APIView):
     permission_classes = [permissions.AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "login"
 
     def post(self, request):
+        # Uso pessoal: desligado por padrao. Ligado, qualquer pessoa com acesso a
+        # API cria uma conta. 404 em vez de 403 para nao confirmar o endpoint.
+        if not settings.ALLOW_PUBLIC_REGISTRATION:
+            logger.warning(
+                "Blocked registration attempt (public registration is disabled) from %s",
+                request.META.get("REMOTE_ADDR"),
+            )
+            return Response({"detail": "Not found."}, status=404)
+
         serializer = RegisterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
@@ -339,6 +365,10 @@ class PluggyRegenerateAuthAPIView(APIView):
 
 class PluggyWebhookAPIView(APIView):
     permission_classes = [permissions.AllowAny]
+    # Sem throttling: a Pluggy chega como anonima e trata qualquer resposta fora
+    # de 2XX como falha, desistindo apos 9 tentativas. Um 429 perderia eventos.
+    # A protecao aqui e o segredo compartilhado, nao a taxa.
+    throttle_classes = []
 
     ALLOWED_EVENTS = {
         "item/created",

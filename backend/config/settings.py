@@ -70,6 +70,8 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
+    # Antes de session/auth: rejeita o que vem do tunel publico o mais cedo possivel.
+    "apps.finance.middleware.PublicTunnelRestrictionMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -77,6 +79,27 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
+
+# Hosts de tunel (ngrok/cloudflared). Requisicoes que chegarem por eles so podem
+# alcancar PUBLIC_TUNNEL_ALLOWED_PATHS; todo o resto recebe 404.
+# O tunel encaminha a porta inteira, entao sem isto expor o webhook expoe
+# tambem /admin/, /graphql/ e /api/v1/auth/token/.
+PUBLIC_TUNNEL_HOSTS = [
+    h.strip()
+    for h in os.getenv("DJANGO_PUBLIC_TUNNEL_HOSTS", "").split(",")
+    if h.strip()
+]
+
+PUBLIC_TUNNEL_ALLOWED_PATHS = (
+    "/api/v1/pluggy/webhook/",
+    "/health/",
+)
+
+# Uso pessoal: o registro publico nasce desligado. Ligar permite que qualquer
+# pessoa com acesso a API crie uma conta.
+ALLOW_PUBLIC_REGISTRATION = (
+    os.getenv("DJANGO_ALLOW_PUBLIC_REGISTRATION", "False").lower() == "true"
+)
 
 ROOT_URLCONF = "config.urls"
 
@@ -130,6 +153,16 @@ REST_FRAMEWORK = {
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
+    "DEFAULT_THROTTLE_CLASSES": (
+        "rest_framework.throttling.AnonRateThrottle",
+        "rest_framework.throttling.UserRateThrottle",
+    ),
+    "DEFAULT_THROTTLE_RATES": {
+        "anon": "60/hour",
+        "user": "2000/hour",
+        # Tentativas de senha. O endpoint de token nao tinha limite nenhum.
+        "login": "10/hour",
+    },
 }
 
 GRAPHENE = {"SCHEMA": "config.schema.schema"}
@@ -139,6 +172,16 @@ CORS_ALLOWED_ORIGINS = [
 ]
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+
+# O throttling do DRF guarda os contadores no cache. Com o LocMemCache default,
+# eles sao por processo e se perdem no restart -- inutil como limite de tentativas
+# de senha. O Redis ja e dependencia do Celery e dos channels.
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": REDIS_URL,
+    }
+}
 
 CELERY_BROKER_URL = REDIS_URL
 CELERY_RESULT_BACKEND = REDIS_URL

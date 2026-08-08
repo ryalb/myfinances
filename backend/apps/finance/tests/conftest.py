@@ -70,6 +70,27 @@ class FakePluggyClient:
         pass
 
 
+@pytest.fixture(autouse=True)
+def isolated_cache(settings):
+    """Isola o cache usado pelo throttling do DRF.
+
+    O cache de producao e o Redis compartilhado com o Celery. Sem isto os
+    contadores de rate limit vazam entre execucoes da suite (e para o app em
+    dev), deixando os testes de limite intermitentes.
+    """
+    settings.CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "tests",
+        }
+    }
+    from django.core.cache import cache
+
+    cache.clear()
+    yield
+    cache.clear()
+
+
 @pytest.fixture
 def user(db):
     return get_user_model().objects.create_user(
