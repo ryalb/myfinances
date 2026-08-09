@@ -110,7 +110,7 @@ const handleSubmit = async () => {
 
                 <div class="flex justify-end gap-2">
                   <Button
-                    class="!rounded-lg !px-4 !py-2 !text-sm !font-medium !text-sepia-600 hover:!bg-sepia-100"
+                    class="!rounded-lg !bg-transparent !px-4 !py-2 !text-sm !font-medium !text-sepia-600 hover:!bg-sepia-100"
                     @click="showModal = false"
                   >
                     Cancelar

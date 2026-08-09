@@ -4,7 +4,14 @@ import graphene
 from django.utils import timezone
 from graphene_django import DjangoObjectType
 
-from .consolidation import build_monthly_cash_flow, build_user_financial_summary
+from .alerts import build_user_alerts
+from .consolidation import (
+    add_months,
+    build_monthly_cash_flow,
+    build_recent_month_averages,
+    build_subscription_overview,
+    build_user_financial_summary,
+)
 from .models import (
     Account,
     CategorizationRule,
@@ -127,8 +134,55 @@ class CategorizationRuleType(DjangoObjectType):
         fields = ("id", "pattern", "category", "priority", "is_active", "created_at", "updated_at")
 
 
+class SubscriptionScheduleItemType(graphene.ObjectType):
+    name = graphene.String()
+    category = graphene.String()
+    due_date = graphene.String()
+    amount = graphene.Float()
+    status = graphene.String()
+
+
+class SubscriptionOverviewType(graphene.ObjectType):
+    monthly_recurring_total = graphene.Float()
+    active_count = graphene.Int()
+    paid_this_month = graphene.Float()
+    pending_this_month = graphene.Float()
+    overdue_total = graphene.Float()
+    overdue = graphene.List(SubscriptionScheduleItemType)
+    upcoming = graphene.List(SubscriptionScheduleItemType)
+
+
+class AlertType(graphene.ObjectType):
+    kind = graphene.String()
+    severity = graphene.String()
+    title = graphene.String()
+    detail = graphene.String()
+    action_path = graphene.String()
+
+
+def _request_cached(info, key, factory):
+    """Memoiza um calculo pelo tempo de vida da requisicao.
+
+    O dashboard consulta `financialSummary` e `financialFreedomProjection` na mesma
+    query, e os dois recalculavam o resumo patrimonial do zero -- iterando as contas
+    duas vezes por carga de tela.
+
+    Escopo de requisicao e nao Redis de proposito: e o unico nivel que nao precisa
+    de invalidacao. Cache de saldo com invalidacao errada mostra dinheiro errado, o
+    que e pior que mostrar devagar.
+    """
+    cache = getattr(info.context, "_finance_resolver_cache", None)
+    if cache is None:
+        cache = {}
+        info.context._finance_resolver_cache = cache
+    if key not in cache:
+        cache[key] = factory()
+    return cache[key]
+
+
 class Query(graphene.ObjectType):
     institutions = graphene.List(FinancialInstitutionType)
+
     accounts = graphene.List(AccountType)
     net_worth_history = graphene.List(NetWorthSnapshotType)
     financial_summary = graphene.Field(FinancialSummaryType)
@@ -137,6 +191,16 @@ class Query(graphene.ObjectType):
     )
     investment_distribution = graphene.List(InvestmentDistributionItemType)
     financial_freedom_projection = graphene.Field(FinancialFreedomProjectionType)
+    # Um resolver sem o campo declarado aqui e ignorado em silencio por graphene:
+    # nao ha erro de import nem de execucao, o campo so nao entra no schema.
+    # test_graphql_schema.py trava a lista completa por causa disso.
+    subscriptions = graphene.List(SubscriptionType)
+    subscription_payments = graphene.List(SubscriptionPaymentType, subscription_id=graphene.Int())
+    categorization_rules = graphene.List(CategorizationRuleType)
+    pension_plans = graphene.List(PensionPlanType)
+    investment_positions = graphene.List(InvestmentPositionType, investment_id=graphene.Int())
+    subscription_overview = graphene.Field(SubscriptionOverviewType, upcoming_days=graphene.Int())
+    alerts = graphene.List(AlertType)
 
     def resolve_institutions(self, info):
         user = info.context.user
@@ -160,7 +224,9 @@ class Query(graphene.ObjectType):
         user = info.context.user
         if not user or not user.is_authenticated:
             return None
-        data = build_user_financial_summary(user)
+        data = _request_cached(
+            info, "financial_summary", lambda: build_user_financial_summary(user)
+        )
         breakdown = data["breakdown"]
         return FinancialSummaryType(
             assets=float(data["assets"]),
@@ -231,33 +297,24 @@ class Query(graphene.ObjectType):
         return result
 
     def resolve_financial_freedom_projection(self, info):
-        from datetime import timedelta
-
         user = info.context.user
         if not user or not user.is_authenticated:
             return None
 
-        summary = build_user_financial_summary(user)
+        summary = _request_cached(
+            info, "financial_summary", lambda: build_user_financial_summary(user)
+        )
         net_worth = float(summary["net_worth"])
 
-        # Calculate average monthly savings from last 3 months
-        now = timezone.localdate()
-        flows = []
-        for i in range(1, 4):
-            d = now - timedelta(days=30 * i)
-            flow = build_monthly_cash_flow(user, year=d.year, month=d.month)
-            flows.append(float(flow["savings"]))
-
-        avg_monthly_savings = sum(flows) / len(flows) if flows else 0
+        # Uma leitura por mes. Antes havia um laco para a media de poupanca e outro
+        # para a de despesa, sobre os mesmos tres meses -- o dobro do custo. Os
+        # meses tambem eram aproximados por `hoje - 30*i dias`, o que a partir de
+        # 31/03 caia no proprio marco e pulava fevereiro.
+        averages = build_recent_month_averages(user, months=3)
+        avg_monthly_savings = float(averages["savings"])
+        avg_monthly_expenses = float(averages["expenses"])
 
         # Target: 25x annual expenses (4% rule)
-        avg_monthly_expenses = (
-            sum(
-                float(build_monthly_cash_flow(user, year=d.year, month=d.month)["expenses"])
-                for d in [now - timedelta(days=30 * i) for i in range(1, 4)]
-            )
-            / 3
-        )
         target_net_worth = avg_monthly_expenses * 12 * 25
         estimated_passive_income = target_net_worth * 0.04
         financial_runway_months = (
@@ -316,7 +373,7 @@ class Query(graphene.ObjectType):
         from datetime import date
 
         retire_date = (
-            (date.today() + timedelta(days=months_to_freedom * 30)).isoformat()
+            add_months(date.today(), months_to_freedom).isoformat()
             if months_to_freedom > 0
             else None
         )
@@ -367,9 +424,48 @@ class Query(graphene.ObjectType):
         user = info.context.user
         if not user or not user.is_authenticated:
             return InvestmentPosition.objects.none()
-        qs = InvestmentPosition.objects.filter(investment__connection__user=user).order_by(
-            "-as_of_date"
+        # `InvestmentPositionType` expoe `investment`: sem o select_related, cada
+        # posicao dispara uma query para o proprio investimento.
+        qs = (
+            InvestmentPosition.objects.filter(investment__connection__user=user)
+            .select_related("investment")
+            .order_by("-as_of_date")
         )
         if investment_id:
             qs = qs.filter(investment_id=investment_id)
         return qs
+
+    def resolve_subscription_overview(self, info, upcoming_days=30):
+        user = info.context.user
+        if not user or not user.is_authenticated:
+            return None
+
+        data = build_subscription_overview(user, upcoming_days=upcoming_days)
+
+        def to_items(rows):
+            return [
+                SubscriptionScheduleItemType(
+                    name=row["name"],
+                    category=row["category"],
+                    due_date=row["due_date"].isoformat(),
+                    amount=float(row["amount"]),
+                    status=row["status"],
+                )
+                for row in rows
+            ]
+
+        return SubscriptionOverviewType(
+            monthly_recurring_total=float(data["monthly_recurring_total"]),
+            active_count=data["active_count"],
+            paid_this_month=float(data["paid_this_month"]),
+            pending_this_month=float(data["pending_this_month"]),
+            overdue_total=float(data["overdue_total"]),
+            overdue=to_items(data["overdue"]),
+            upcoming=to_items(data["upcoming"]),
+        )
+
+    def resolve_alerts(self, info):
+        user = info.context.user
+        if not user or not user.is_authenticated:
+            return []
+        return [AlertType(**alert) for alert in build_user_alerts(user)]

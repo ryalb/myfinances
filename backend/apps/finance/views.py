@@ -1,3 +1,4 @@
+import csv
 import hmac
 import logging
 import os
@@ -6,6 +7,7 @@ from uuid import UUID
 
 from django.conf import settings
 from django.db.models import Q
+from django.http import StreamingHttpResponse
 from django.utils import timezone
 from rest_framework import permissions, viewsets
 from rest_framework.decorators import action
@@ -20,7 +22,12 @@ from .consolidation import (
     build_user_financial_summary,
     snapshot_net_worth,
 )
-from .domain import get_or_create_institution
+from .domain import (
+    active_categorization_rules,
+    get_or_create_institution,
+    normalize_transaction_category,
+)
+from .filters import filter_transactions, user_transactions
 from .models import (
     Account,
     Card,
@@ -38,6 +45,7 @@ from .models import (
     SyncJob,
     Transaction,
 )
+from .pagination import UnboundedCollectionPagination
 from .serializers import (
     AccountSerializer,
     CardSerializer,
@@ -157,19 +165,28 @@ class AccountViewSet(viewsets.ReadOnlyModelViewSet):
 class TransactionViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = TransactionSerializer
     permission_classes = [permissions.IsAuthenticated]
+    pagination_class = UnboundedCollectionPagination
 
     def get_queryset(self):
-        qs = Transaction.objects.filter(
-            Q(account__connection__user=self.request.user)
-            | Q(card__connection__user=self.request.user)
-        ).select_related("account", "card")
-        start_date = self.request.query_params.get("start_date")
-        end_date = self.request.query_params.get("end_date")
-        if start_date:
-            qs = qs.filter(booked_at__gte=start_date)
-        if end_date:
-            qs = qs.filter(booked_at__lt=end_date)
-        return qs
+        queryset = user_transactions(self.request.user).select_related("account", "card")
+        return filter_transactions(queryset, self.request.query_params).order_by("-booked_at")
+
+    @action(detail=False, methods=["get"], url_path="categories")
+    def categories(self, request):
+        """Categorias presentes nas transações do usuário, para o filtro da tela.
+
+        Vem dos dados e não de um enum: a categoria pode chegar da Pluggy, de uma
+        regra do usuário ou das palavras-chave, então um enum fixo ficaria
+        desatualizado sem ninguém notar.
+        """
+        values = (
+            user_transactions(request.user)
+            .exclude(category="")
+            .values_list("category", flat=True)
+            .distinct()
+            .order_by("category")
+        )
+        return Response(list(values))
 
 
 class CardViewSet(viewsets.ReadOnlyModelViewSet):
@@ -213,10 +230,14 @@ class PensionPlanViewSet(viewsets.ReadOnlyModelViewSet):
 class SyncJobViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = SyncJobSerializer
     permission_classes = [permissions.IsAuthenticated]
+    pagination_class = UnboundedCollectionPagination
 
     def get_queryset(self):
+        # `institution` e obrigatorio no select_related: o serializer expoe
+        # `connection.institution.name`, entao parar em `connection` faz uma query
+        # por job.
         return SyncJob.objects.filter(connection__user=self.request.user).select_related(
-            "connection"
+            "connection__institution"
         )
 
 
@@ -554,17 +575,163 @@ class CategorizationRuleViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
 
+    @action(detail=False, methods=["post"], url_path="reapply")
+    def reapply(self, request):
+        """Reaplica as regras ao historico ja importado.
+
+        As regras rodavam somente no import, entao criar uma regra nao mexia em
+        nada que ja estava no banco -- a tela ficava sem efeito visivel.
+
+        Sincrono de proposito: quem clica quer ver quantos lancamentos mudaram, e
+        uma task Celery obrigaria a UI a ficar consultando status. As regras sao
+        lidas uma vez e a gravacao e em lote, entao o custo nao cresce por
+        transacao.
+        """
+        rules = active_categorization_rules(request.user)
+        queryset = Transaction.objects.filter(
+            Q(account__connection__user=request.user) | Q(card__connection__user=request.user)
+        ).only("id", "description", "provider_category", "type", "category")
+
+        changed = []
+        for transaction in queryset.iterator(chunk_size=2000):
+            category = normalize_transaction_category(
+                transaction.description,
+                transaction.provider_category,
+                transaction.type,
+                user=request.user,
+                rules=rules,
+            )
+            if category != transaction.category:
+                transaction.category = category
+                changed.append(transaction)
+
+        if changed:
+            Transaction.objects.bulk_update(changed, ["category"], batch_size=1000)
+
+        logger.info(
+            "Regras reaplicadas para o usuario %s: %s lancamentos atualizados",
+            request.user.pk,
+            len(changed),
+        )
+        return Response({"updated": len(changed)})
+
+
+class TransactionCSVExportAPIView(APIView):
+    """Exporta as transacoes do usuario em CSV.
+
+    Streaming e nao `Response`: o historico nao tem teto e montar o arquivo inteiro
+    em memoria antes de responder e o que faz esse tipo de endpoint derrubar o
+    processo. Sem paginacao de proposito -- um CSV truncado em 100 linhas de um
+    historico de milhares e uma armadilha silenciosa.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    COLUMNS = (
+        "data",
+        "descricao",
+        "valor",
+        "moeda",
+        "tipo",
+        "categoria",
+        "categoria_origem",
+        "conta",
+        "instituicao",
+    )
+
+    TYPE_LABELS = {"credit": "receita", "debit": "despesa"}
+
+    def get(self, request):
+        # Mesmos filtros da listagem, via helper compartilhado: um CSV que nao
+        # corresponde ao que esta na tela e pior que nao ter exportacao.
+        queryset = filter_transactions(
+            user_transactions(request.user).select_related(
+                "account__connection__institution",
+                "card__connection__institution",
+            ),
+            request.query_params,
+        ).order_by("booked_at")
+
+        today = timezone.localdate().isoformat()
+        response = StreamingHttpResponse(
+            self._rows(queryset), content_type="text/csv; charset=utf-8"
+        )
+        response["Content-Disposition"] = f'attachment; filename="transacoes-{today}.csv"'
+        return response
+
+    def _rows(self, queryset):
+        writer = csv.writer(_PassthroughSink())
+        # BOM: sem ele o Excel no Windows le UTF-8 como Latin-1 e "Alimentação"
+        # chega quebrado.
+        yield "﻿"
+        yield writer.writerow(self.COLUMNS)
+
+        for transaction in queryset.iterator(chunk_size=2000):
+            holder = transaction.account or transaction.card
+            connection = holder.connection if holder else None
+            writer_row = (
+                transaction.booked_at.date().isoformat(),
+                transaction.description,
+                # `str(Decimal)` e nao formatacao localizada: LANGUAGE_CODE=pt-br
+                # produziria virgula decimal, o que numa coluna CSV vira texto na
+                # planilha.
+                str(transaction.amount),
+                transaction.currency,
+                self.TYPE_LABELS.get(transaction.type, transaction.type),
+                transaction.category or "",
+                transaction.provider_category or "",
+                holder.name if holder else "",
+                connection.institution.name if connection else "",
+            )
+            yield writer.writerow(writer_row)
+
+
+class _PassthroughSink:
+    """Sink que devolve o que o csv.writer escreveria.
+
+    `csv.writer` exige um objeto com `write`; para streaming a linha precisa voltar
+    ao gerador em vez de ir para um buffer.
+    """
+
+    def write(self, value):
+        return value
+
 
 class PortfolioReportAPIView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
-        from .ai_services import LLMService, RAGService
+        from .ai_services import AIServiceUnavailable, LLMService, RAGService
 
-        rag = RAGService()
-        llm = LLMService()
+        query = request.data.get("query") or (
+            "saude financeira, patrimonio, gastos recorrentes e oportunidades de investimento"
+        )
 
-        rag.index_user_context(request.user)
-        chunks = rag.search(request.user, "relatório financeiro personalizado", top_k=5)
-        report = llm.generate_portfolio_report(request.user, chunks)
+        try:
+            # Construidos dentro do try: a checagem de inferencia local levanta no
+            # __init__, e isso precisa virar 503 e nao 500.
+            rag = RAGService()
+            llm = LLMService()
+
+            index_stats = rag.index_user_context(request.user)
+            context = rag.retrieve_report_context(request.user, query)
+            if not context:
+                return Response(
+                    {
+                        "error": (
+                            "Nao ha dados suficientes para gerar o relatorio. "
+                            "Conecte uma instituicao e sincronize antes."
+                        )
+                    },
+                    status=422,
+                )
+            report = llm.generate_portfolio_report(context)
+        except AIServiceUnavailable as exc:
+            # 503 e nao 500: a causa e a dependencia local (Ollama) estar fora ou o
+            # destino de inferencia nao ser permitido, e a mensagem precisa dizer
+            # isso em vez de virar stack trace.
+            logger.warning("Relatorio de portfolio indisponivel: %s", exc)
+            return Response({"error": str(exc)}, status=503)
+
+        report["index"] = index_stats
         return Response(report)

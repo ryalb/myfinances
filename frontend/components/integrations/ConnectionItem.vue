@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import Button from 'primevue/button'
+import { extractApiError } from '@/composables/useApi'
 const props = defineProps<{
   connection: {
     id: number
@@ -15,6 +16,7 @@ const props = defineProps<{
 const { post, del } = useApi()
 const syncing = ref(false)
 const removing = ref(false)
+const error = ref('')
 
 const statusColors: Record<string, string> = {
   active: 'bg-emerald-100 text-emerald-700',
@@ -25,8 +27,11 @@ const statusColors: Record<string, string> = {
 
 const sync = async () => {
   syncing.value = true
+  error.value = ''
   try {
     await post(`/connections/${props.connection.id}/sync/`, { kind: 'incremental' })
+  } catch (e: unknown) {
+    error.value = extractApiError(e, 'Erro ao sincronizar a conexão.')
   } finally {
     syncing.value = false
   }
@@ -35,9 +40,14 @@ const sync = async () => {
 const remove = async () => {
   if (!confirm('Tem certeza que deseja remover esta conexão?')) return
   removing.value = true
+  error.value = ''
   try {
     await del(`/connections/${props.connection.id}/`)
+    // Navega só depois do sucesso: antes uma remoção falha saía da tela como se
+    // tivesse funcionado, e a conexão reaparecia no próximo carregamento.
     navigateTo('/integrations')
+  } catch (e: unknown) {
+    error.value = extractApiError(e, 'Erro ao remover a conexão.')
   } finally {
     removing.value = false
   }
@@ -66,18 +76,21 @@ const remove = async () => {
       {{ props.connection.error_message }}
     </p>
 
+    <!-- Falha da última ação nesta conexão (sync/remoção) -->
+    <p v-if="error" class="mt-2 text-xs text-rose-600">{{ error }}</p>
+
     <!-- Actions -->
     <div class="mt-4 flex gap-2">
       <Button
         :disabled="syncing"
-        class="!rounded-lg !border !border-sepia-200 !px-3 !py-1.5 !text-xs !font-medium !text-sepia-600 hover:!bg-sepia-50 disabled:!opacity-50"
+        class="!rounded-lg !border !border-sepia-200 !bg-white !px-3 !py-1.5 !text-xs !font-medium !text-sepia-600 hover:!bg-sepia-50 disabled:!opacity-50"
         @click="sync"
       >
         {{ syncing ? 'Sincronizando...' : 'Sincronizar agora' }}
       </Button>
       <Button
         :disabled="removing"
-        class="!rounded-lg !border !border-rose-200 !px-3 !py-1.5 !text-xs !font-medium !text-rose-600 hover:!bg-rose-50 disabled:!opacity-50"
+        class="!rounded-lg !border !border-rose-200 !bg-white !px-3 !py-1.5 !text-xs !font-medium !text-rose-600 hover:!bg-rose-50 disabled:!opacity-50"
         @click="remove"
       >
         {{ removing ? 'Removendo...' : 'Remover' }}

@@ -19,28 +19,33 @@ export const useDashboardMetrics = async (): Promise<DashboardMetrics> => {
   const { get } = useApi()
 
   const now = new Date()
-  const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
-  const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString()
 
-  const [accountsRes, transactionsRes, summaryRes] = await Promise.all([
+  // Receita e despesa do mês vêm de `/cash-flow/`, não de somar `/transactions/`
+  // no cliente. Três motivos:
+  //
+  // 1. `/transactions/` é paginado — somar `.results` daria só os 100 primeiros
+  //    lançamentos do mês, errado em silêncio num mês movimentado.
+  // 2. O backend agrega no banco, em vez de trafegar o mês inteiro para descartar.
+  // 3. É a mesma fonte do gráfico de fluxo de caixa. Antes os cards e o gráfico
+  //    podiam divergir, porque a soma no cliente ignorava as assinaturas.
+  const [accountsRes, cashFlowRes, summaryRes] = await Promise.all([
     get<{ balance: number; type: string; available_balance: number }[]>(`/accounts/`),
-    get<{ amount: number; type: string; booked_at: string }[]>(`/transactions/?start_date=${currentMonthStart}&end_date=${nextMonthStart}`),
+    // `DecimalField` do DRF serializa como string por padrão, então estes campos
+    // chegam como "5000.00" e não 5000. O `Number()` abaixo é obrigatório.
+    get<{ income: string; expenses: string; savings: string; savings_rate: string }>(
+      `/cash-flow/?year=${now.getFullYear()}&month=${now.getMonth() + 1}`,
+    ),
     get<{ assets: number; liabilities: number; net_worth: number; breakdown: Record<string, number> }>(`/summary/`),
   ])
 
   const accounts = accountsRes || []
-  const transactions = transactionsRes || []
   const summary = summaryRes || null
 
   const patrimonyTotal = summary ? Number(summary.assets || 0) : accounts.reduce((acc, account) => acc + Number(account.available_balance || account.balance || 0), 0)
   const netBalance = summary ? Number(summary.net_worth || patrimonyTotal) : patrimonyTotal
-  const monthlyExpenses = transactions
-    .filter((tx) => tx.type === 'debit')
-    .reduce((acc, tx) => acc + Number(tx.amount || 0), 0)
-  const monthlyIncome = transactions
-    .filter((tx) => tx.type === 'credit')
-    .reduce((acc, tx) => acc + Number(tx.amount || 0), 0)
-  const savingsRate = monthlyIncome > 0 ? ((monthlyIncome - monthlyExpenses) / monthlyIncome) * 100 : 0
+  const monthlyExpenses = Number(cashFlowRes?.expenses || 0)
+  const monthlyIncome = Number(cashFlowRes?.income || 0)
+  const savingsRate = Number(cashFlowRes?.savings_rate || 0)
 
   return {
     patrimonyTotal,

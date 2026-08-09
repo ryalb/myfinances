@@ -59,9 +59,7 @@ class TestPublicTunnelRestriction:
         assert response.status_code == 200, "o webhook precisa continuar acessivel"
 
     @pytest.mark.django_db
-    def test_webhook_still_rejects_a_bad_token_through_the_tunnel(
-        self, api, tunnel, monkeypatch
-    ):
+    def test_webhook_still_rejects_a_bad_token_through_the_tunnel(self, api, tunnel, monkeypatch):
         monkeypatch.setenv("PLUGGY_WEBHOOK_SECRET", "segredo")
         response = api.post(
             f"{WEBHOOK}?token=errado",

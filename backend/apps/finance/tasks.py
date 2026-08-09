@@ -54,19 +54,30 @@ def _parse_booked_at(raw_date: str | None) -> datetime:
 
 def _upsert_transaction(tx: dict, *, account, card, user) -> None:
     provider_category = tx.get("category", "") or ""
+    tx_type = _normalize_transaction_type(tx.get("type"))
     Transaction.objects.update_or_create(
         external_id=tx["id"],
         defaults={
             "account": account,
             "card": card,
             "description": tx.get("description", "Transação"),
-            "amount": tx.get("amount", 0) or 0,
+            # Magnitude, nao valor com sinal.
+            #
+            # A Pluggy assina `amount` e a convencao **difere** entre conta e cartao:
+            # em conta a saida e negativa; em cartao a compra e positiva e o
+            # pagamento da fatura e negativo. O indicador confiavel de direcao e
+            # `type` (DEBIT = saida, CREDIT = entrada), que e obrigatorio.
+            #
+            # Guardar com sinal fazia `Sum(amount)` das despesas dar negativo (taxa
+            # de poupanca acima de 100%), o prefixo "-" da tela virar "--", e a
+            # reconciliacao de assinaturas nunca casar, porque ela filtra amount > 0.
+            "amount": abs(tx.get("amount", 0) or 0),
             "currency": tx.get("currencyCode", "BRL"),
-            "type": _normalize_transaction_type(tx.get("type")),
+            "type": tx_type,
             "category": normalize_transaction_category(
                 tx.get("description", ""),
                 provider_category,
-                _normalize_transaction_type(tx.get("type")),
+                tx_type,
                 user=user,
             ),
             "provider_category": provider_category,
@@ -259,7 +270,60 @@ def _reconcile_subscriptions(user) -> None:
         SubscriptionPayment.objects.bulk_update(to_update, ["status", "paid_date", "paid_amount"])
 
 
-def _sync_pension_plans(client: PluggyClient, connection) -> None:
+# Previdencia privada na Pluggy e `type: "SECURITY"`, com `subtype` em
+# RETIREMENT | PGBL | VGBL. Nao existe `type: "PENSION"` no enum -- os tipos sao
+# FIXED_INCOME, SECURITY, MUTUAL_FUND, EQUITY, ETF e COE.
+# Ver https://docs.pluggy.ai/docs/investments
+PENSION_INVESTMENT_TYPE = "SECURITY"
+PENSION_INVESTMENT_SUBTYPES = frozenset({"RETIREMENT", "PGBL", "VGBL"})
+
+
+def _is_pension_investment(investment_data: dict) -> bool:
+    if (investment_data.get("type") or "").upper() == PENSION_INVESTMENT_TYPE:
+        return True
+    # `subtype` e opcional na Pluggy e `type` e obrigatorio, entao o type e o sinal
+    # confiavel. O subtype fica como rede para provedor que rotula fora do padrao.
+    return (investment_data.get("subtype") or "").upper() in PENSION_INVESTMENT_SUBTYPES
+
+
+# `status` documentado: ACTIVE (comprado), PENDING (validando), TOTAL_WITHDRAWAL
+# (vendido ou transferido).
+WITHDRAWN_INVESTMENT_STATUS = "TOTAL_WITHDRAWAL"
+
+
+def _is_withdrawn_investment(investment_data: dict) -> bool:
+    """Posicao liquidada: a Pluggy diz que o ativo saiu da carteira.
+
+    Sem checar isto, a lista de investimentos acumula linhas zeradas -- o sync
+    gravava toda posicao devolvida, inclusive as ja vendidas.
+    """
+    return (investment_data.get("status") or "").upper() == WITHDRAWN_INVESTMENT_STATUS
+
+
+def _pension_provider(investment_data: dict, connection) -> str:
+    """Quem administra a previdencia.
+
+    Nao existe campo `provider` no payload -- o codigo antigo lia esse nome e
+    gravava string vazia sempre. A seguradora e o dado mais preciso (e nem sempre e
+    a corretora pela qual foi contratada); a doc a mostra dentro de `institution` e
+    tambem lista em `metadata`, entao os dois lugares sao consultados.
+    """
+    institution = investment_data.get("institution") or {}
+    metadata = investment_data.get("metadata") or {}
+    for source in (institution.get("insurer"), metadata.get("insurer")):
+        if isinstance(source, dict) and source.get("name"):
+            return source["name"]
+    return institution.get("name") or connection.institution.name
+
+
+def _sync_pension_plans(client, connection) -> None:
+    """Grava as previdencias privadas do item.
+
+    `client` fica sem anotacao de tipo de proposito: a unica coisa usada aqui e
+    `fetch_item_investments`, e o teste passa o `FakePluggyClient` do conftest, que
+    implementa a interface sem herdar de `PluggyClient`. Anotar a classe concreta
+    seria afirmar algo que o chamador de teste nao cumpre.
+    """
     try:
         investments_data = client.fetch_item_investments(connection.external_id)
     except Exception as exc:
@@ -271,16 +335,17 @@ def _sync_pension_plans(client: PluggyClient, connection) -> None:
         return
 
     for investment_data in investments_data:
-        if investment_data.get("type", "").lower() in ("pension", "previdencia"):
-            PensionPlan.objects.update_or_create(
-                connection=connection,
-                external_id=investment_data["id"],
-                defaults={
-                    "name": investment_data.get("name", "Previdência"),
-                    "provider": investment_data.get("provider", ""),
-                    "balance": investment_data.get("balance", 0) or 0,
-                },
-            )
+        if not _is_pension_investment(investment_data):
+            continue
+        PensionPlan.objects.update_or_create(
+            connection=connection,
+            external_id=investment_data["id"],
+            defaults={
+                "name": investment_data.get("name", "Previdência"),
+                "provider": _pension_provider(investment_data, connection),
+                "balance": investment_data.get("balance", 0) or 0,
+            },
+        )
 
 
 @shared_task
@@ -422,6 +487,28 @@ def sync_connection_data(sync_job_id: int) -> None:
             investments_data = client.fetch_item_investments(connection.external_id)
             today = timezone.localdate()
             for investment_data in investments_data:
+                # Previdencia sai daqui e entra como PensionPlan. Gravar nos dois
+                # somaria o mesmo ativo duas vezes no patrimonio:
+                # `InvestmentPosition.market_value` + `PensionPlan.balance`.
+                if _is_pension_investment(investment_data):
+                    continue
+
+                if _is_withdrawn_investment(investment_data):
+                    # Remove em vez de so pular: a Pluggy esta dizendo que o ativo
+                    # saiu da carteira, e pular deixaria a linha antiga para sempre.
+                    # O historico agregado de patrimonio vive em NetWorthSnapshot,
+                    # nao aqui.
+                    deleted, _ = Investment.objects.filter(
+                        connection=connection, external_id=investment_data["id"]
+                    ).delete()
+                    if deleted:
+                        logger.info(
+                            "Investimento liquidado removido: %s (%s)",
+                            investment_data.get("name"),
+                            investment_data["id"],
+                        )
+                    continue
+
                 investment, _ = Investment.objects.update_or_create(
                     external_id=investment_data["id"],
                     defaults={
@@ -436,7 +523,9 @@ def sync_connection_data(sync_job_id: int) -> None:
                     as_of_date=today,
                     defaults={
                         "quantity": investment_data.get("quantity", 0) or 0,
-                        "unit_price": investment_data.get("price", 0) or 0,
+                        # `value` e o valor da cota. O campo lido antes (`price`)
+                        # nao existe no payload, entao unit_price era sempre zero.
+                        "unit_price": investment_data.get("value", 0) or 0,
                         "market_value": investment_data.get("balance", 0) or 0,
                     },
                 )
@@ -493,6 +582,47 @@ def sync_connection_data(sync_job_id: int) -> None:
 def recompute_user_snapshot(user_id: int) -> None:
     user = get_user_model().objects.get(pk=user_id)
     snapshot_net_worth(user)
+
+
+@shared_task
+def snapshot_all_users() -> int:
+    """Grava o snapshot patrimonial diario de todo usuario com conexao.
+
+    Roda no beat porque a Pluggy so avisa quando ha movimento: sem isto um mes
+    sem sync deixa buraco no grafico de evolucao patrimonial. Usuario sem
+    conexao fica de fora -- um snapshot zerado por dia seria ruido.
+    """
+    users = get_user_model().objects.filter(connections__isnull=False).distinct()
+    written = 0
+    for user in users:
+        # Um usuario com dado ruim nao pode abortar o lote: a task roda uma vez
+        # por dia e nao existe retry por usuario.
+        try:
+            snapshot_net_worth(user)
+            written += 1
+        except Exception:
+            logger.exception("Snapshot patrimonial falhou para o usuario %s", user.pk)
+    logger.info("Snapshot patrimonial gravado para %s de %s usuarios", written, users.count())
+    return written
+
+
+@shared_task
+def reconcile_all_subscriptions() -> int:
+    """Reconcilia assinaturas de todo usuario com assinatura ativa.
+
+    Sem isto uma assinatura vencida so virava `overdue` no proximo sync, e
+    contas pagas fora de instituicao conectada nunca ganhavam a linha do mes.
+    """
+    users = get_user_model().objects.filter(subscriptions__is_active=True).distinct()
+    reconciled = 0
+    for user in users:
+        try:
+            _reconcile_subscriptions(user)
+            reconciled += 1
+        except Exception:
+            logger.exception("Reconciliacao de assinaturas falhou para o usuario %s", user.pk)
+    logger.info("Assinaturas reconciliadas para %s de %s usuarios", reconciled, users.count())
+    return reconciled
 
 
 def _queue_full_sync(connection, reason: str) -> None:

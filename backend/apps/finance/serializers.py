@@ -175,7 +175,37 @@ class FinancialGoalSerializer(serializers.ModelSerializer):
         return 0.0
 
 
+class UserScopedPrimaryKeyRelatedField(serializers.PrimaryKeyRelatedField):
+    """FK que so aceita objetos do proprio usuario autenticado.
+
+    O `ModelSerializer` monta a FK validando contra a tabela inteira: qualquer id
+    existente passa. Como `SubscriptionPayment.subscription`,
+    `Subscription.connection` e `Subscription.payment_account` sao gravaveis, isso
+    permitia a um usuario autenticado pendurar a propria assinatura na conta
+    bancaria de outro -- ou criar pagamentos dentro da assinatura de outro.
+
+    `user_path` e o lookup do dono a partir do modelo relacionado (`user` para
+    Subscription/Connection, `connection__user` para Account).
+    """
+
+    def __init__(self, *args, user_path: str, **kwargs):
+        self.user_path = user_path
+        super().__init__(*args, **kwargs)
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        user = getattr(self.context.get("request"), "user", None)
+        # Falha fechada: sem request autenticado no contexto nenhum id e valido.
+        if user is None or not user.is_authenticated:
+            return queryset.none()
+        return queryset.filter(**{self.user_path: user})
+
+
 class SubscriptionPaymentSerializer(serializers.ModelSerializer):
+    subscription = UserScopedPrimaryKeyRelatedField(
+        queryset=Subscription.objects.all(), user_path="user"
+    )
+
     class Meta:
         model = SubscriptionPayment
         fields = (
@@ -193,6 +223,18 @@ class SubscriptionPaymentSerializer(serializers.ModelSerializer):
 
 class SubscriptionSerializer(serializers.ModelSerializer):
     payments = SubscriptionPaymentSerializer(many=True, read_only=True)
+    connection = UserScopedPrimaryKeyRelatedField(
+        queryset=Connection.objects.all(),
+        user_path="user",
+        required=False,
+        allow_null=True,
+    )
+    payment_account = UserScopedPrimaryKeyRelatedField(
+        queryset=Account.objects.all(),
+        user_path="connection__user",
+        required=False,
+        allow_null=True,
+    )
 
     class Meta:
         model = Subscription

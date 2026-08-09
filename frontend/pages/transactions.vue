@@ -1,47 +1,233 @@
 <script setup lang="ts">
 import { useUiStore } from '@/stores/ui'
 import { formatBRL } from '@/composables/useCurrency'
+import { extractApiError } from '@/composables/useApi'
 
 definePageMeta({
   middleware: 'auth',
 })
 
-const config = useRuntimeConfig()
-const token = useCookie<string | null>('access_token')
-const headers = token.value ? { Authorization: `Bearer ${token.value}` } : {}
+type TransactionRow = {
+  id: number
+  description: string
+  amount: number
+  type: string
+  category: string
+  booked_at: string
+}
 
-const { data: transactions } = await useFetch<
-  {
-    id: number
-    description: string
-    amount: number
-    type: string
-    category: string
-    booked_at: string
-  }[]
->(`${config.public.apiBaseUrl}/transactions/`, { key: 'transactions-page', headers })
+const filters = reactive({
+  search: '',
+  category: '',
+  type: '',
+  start_date: '',
+  end_date: '',
+  min_amount: '',
+  max_amount: '',
+})
+
+// A busca é debounced: cada tecla dispararia uma requisição, e o backend faz
+// `icontains` sobre o histórico inteiro.
+const debouncedSearch = ref('')
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+watch(
+  () => filters.search,
+  (value) => {
+    if (searchTimer) clearTimeout(searchTimer)
+    searchTimer = setTimeout(() => {
+      debouncedSearch.value = value
+    }, 300)
+  },
+)
+onUnmounted(() => {
+  if (searchTimer) clearTimeout(searchTimer)
+})
+
+const activeParams = () => ({
+  search: debouncedSearch.value,
+  category: filters.category,
+  type: filters.type,
+  start_date: filters.start_date,
+  end_date: filters.end_date,
+  min_amount: filters.min_amount,
+  max_amount: filters.max_amount,
+})
+
+// Paginação real: antes o endpoint devolvia o histórico inteiro e a tela cortava
+// as 100 primeiras no cliente — o resto viajava pela rede só para ser descartado.
+const {
+  items: transactions,
+  count,
+  page,
+  totalPages,
+  hasNext,
+  hasPrevious,
+  loading,
+  next,
+  previous,
+} = usePaginatedList<TransactionRow>('transactions-page', '/transactions/', {
+  pageSize: 50,
+  params: activeParams,
+})
+
+const { get, download } = useApi()
+
+// Categorias vêm dos dados, não de um enum: podem chegar da Pluggy, de uma regra do
+// usuário ou das palavras-chave.
+const { data: categories } = await useAsyncData(
+  'transaction-categories',
+  async () => (await get<string[]>('/transactions/categories/')) || [],
+  { default: () => [] },
+)
+
+const hasActiveFilter = computed(() =>
+  Object.values(activeParams()).some((value) => value !== ''),
+)
+
+const clearFilters = () => {
+  filters.search = ''
+  filters.category = ''
+  filters.type = ''
+  filters.start_date = ''
+  filters.end_date = ''
+  filters.min_amount = ''
+  filters.max_amount = ''
+  debouncedSearch.value = ''
+}
+
+const uiStore = useUiStore()
+const blur = computed(() => (uiStore.isFinancialValueBlurred ? 'blur-sm select-none' : ''))
+
+const exporting = ref(false)
+const exportError = ref('')
+
+const exportCsv = async () => {
+  exporting.value = true
+  exportError.value = ''
+  try {
+    // Os mesmos filtros da tela: um CSV que não corresponde ao que está visível
+    // seria pior que não ter exportação.
+    const query = new URLSearchParams(
+      Object.entries(activeParams()).filter(([, value]) => value !== ''),
+    ).toString()
+    const today = new Date().toISOString().slice(0, 10)
+    await download(
+      `/export/transactions.csv${query ? `?${query}` : ''}`,
+      `transacoes-${today}.csv`,
+    )
+  } catch (e: unknown) {
+    exportError.value = extractApiError(e, 'Erro ao exportar as transações.')
+  } finally {
+    exporting.value = false
+  }
+}
 
 const typeBadge = (type: string) =>
-  type === 'credit'
-    ? 'bg-emerald-100 text-emerald-700'
-    : 'bg-rose-100 text-rose-700'
+  type === 'credit' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'
 
 const typeLabel = (type: string) => (type === 'credit' ? 'Receita' : 'Despesa')
 
-const uiStore = useUiStore()
+const inputClass
+  = 'w-full rounded-lg border border-sepia-300 bg-white px-3 py-2 text-sm focus:border-sepia-500 focus:outline-none focus:ring-1 focus:ring-sepia-500'
 </script>
 
 <template>
   <section class="space-y-6">
-    <h1 class="text-2xl font-semibold">Transações</h1>
-
-    <div v-if="!transactions?.length" class="rounded-lg border border-dashed border-sepia-300 p-8 text-center">
-      <Icon icon="mdi:receipt-outline" class="mx-auto mb-3 h-10 w-10 text-sepia-300" />
-      <p class="text-sepia-500">Nenhuma transação encontrada.</p>
-      <p class="mt-1 text-sm text-sepia-400">Sincronize suas contas para ver as transações.</p>
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <h1 class="text-2xl font-semibold">Transações</h1>
+      <div class="flex items-center gap-3">
+        <span class="text-sm text-sepia-500">
+          {{ count }} {{ count === 1 ? 'lançamento' : 'lançamentos' }}
+          <span v-if="hasActiveFilter" class="text-sepia-400">(filtrado)</span>
+        </span>
+        <button
+          type="button"
+          :disabled="exporting || !count"
+          class="inline-flex items-center gap-2 rounded-lg border border-sepia-200 bg-white px-3 py-1.5 text-xs font-medium text-sepia-600 hover:bg-sepia-50 disabled:opacity-40"
+          @click="exportCsv"
+        >
+          <Icon icon="mdi:download-outline" class="h-4 w-4" />
+          {{ exporting ? 'Exportando...' : 'Exportar CSV' }}
+        </button>
+      </div>
     </div>
 
-    <div v-else class="rounded-xl border border-sepia-200 bg-white shadow-sm">
+    <p v-if="exportError" class="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+      {{ exportError }}
+    </p>
+
+    <!-- Filtros -->
+    <div class="rounded-xl border border-sepia-200 bg-white p-4 shadow-sm">
+      <div class="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
+        <div class="lg:col-span-2">
+          <label class="mb-1 block text-xs font-medium text-sepia-700">Buscar na descrição</label>
+          <div class="relative">
+            <Icon icon="mdi:magnify" class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-sepia-400" />
+            <input v-model="filters.search" type="search" placeholder="Ex: uber, mercado, salário" :class="[inputClass, 'pl-9']">
+          </div>
+        </div>
+
+        <div>
+          <label class="mb-1 block text-xs font-medium text-sepia-700">Categoria</label>
+          <select v-model="filters.category" :class="inputClass">
+            <option value="">Todas</option>
+            <option v-for="category in categories" :key="category" :value="category">{{ category }}</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="mb-1 block text-xs font-medium text-sepia-700">Tipo</label>
+          <select v-model="filters.type" :class="inputClass">
+            <option value="">Todos</option>
+            <option value="credit">Receita</option>
+            <option value="debit">Despesa</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="mb-1 block text-xs font-medium text-sepia-700">De</label>
+          <input v-model="filters.start_date" type="date" :class="inputClass">
+        </div>
+
+        <div>
+          <label class="mb-1 block text-xs font-medium text-sepia-700">Até</label>
+          <input v-model="filters.end_date" type="date" :class="inputClass">
+        </div>
+
+        <div>
+          <label class="mb-1 block text-xs font-medium text-sepia-700">Valor mínimo</label>
+          <input v-model="filters.min_amount" type="number" step="0.01" min="0" placeholder="0,00" :class="inputClass">
+        </div>
+
+        <div>
+          <label class="mb-1 block text-xs font-medium text-sepia-700">Valor máximo</label>
+          <input v-model="filters.max_amount" type="number" step="0.01" min="0" placeholder="Sem limite" :class="inputClass">
+        </div>
+      </div>
+
+      <div v-if="hasActiveFilter" class="mt-3 flex justify-end">
+        <button
+          type="button"
+          class="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-sepia-600 hover:bg-sepia-50"
+          @click="clearFilters"
+        >
+          <Icon icon="mdi:filter-remove-outline" class="h-4 w-4" />
+          Limpar filtros
+        </button>
+      </div>
+    </div>
+
+    <div v-if="!transactions.length && !loading" class="rounded-lg border border-dashed border-sepia-300 p-8 text-center">
+      <Icon icon="mdi:receipt-outline" class="mx-auto mb-3 h-10 w-10 text-sepia-300" />
+      <p class="text-sepia-500">
+        {{ hasActiveFilter ? 'Nenhuma transação para esses filtros.' : 'Nenhuma transação encontrada.' }}
+      </p>
+      <p class="mt-1 text-sm text-sepia-400">
+        {{ hasActiveFilter ? 'Ajuste ou limpe os filtros.' : 'Sincronize suas contas para ver as transações.' }}
+      </p>
+    </div>
+
+    <div v-else class="overflow-hidden rounded-xl border border-sepia-200 bg-white shadow-sm">
       <table class="w-full text-sm">
         <thead class="border-b border-sepia-200 bg-sepia-50">
           <tr>
@@ -53,26 +239,46 @@ const uiStore = useUiStore()
           </tr>
         </thead>
         <tbody>
-          <tr v-for="tx in transactions.slice(0, 100)" :key="tx.id" class="border-b border-sepia-100 last:border-0">
-            <td class="px-4 py-3 text-sepia-500">{{ new Date(tx.booked_at).toLocaleDateString('pt-BR') }}</td>
+          <tr v-for="tx in transactions" :key="tx.id" class="border-b border-sepia-100 last:border-0">
+            <td class="whitespace-nowrap px-4 py-3 text-sepia-500">{{ new Date(tx.booked_at).toLocaleDateString('pt-BR') }}</td>
             <td class="px-4 py-3 font-medium text-sepia-900">{{ tx.description }}</td>
             <td class="px-4 py-3">
-              <span v-if="tx.category" class="rounded bg-sepia-100 px-2 py-0.5 text-xs text-sepia-600">
+              <span v-if="tx.category" class="inline-block whitespace-nowrap rounded bg-sepia-100 px-2 py-0.5 text-xs text-sepia-600">
                 {{ tx.category }}
               </span>
               <span v-else class="text-sepia-400">—</span>
             </td>
             <td class="px-4 py-3">
-              <span :class="['rounded-full px-2 py-0.5 text-xs font-medium', typeBadge(tx.type)]">
+              <span :class="['inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium', typeBadge(tx.type)]">
                 {{ typeLabel(tx.type) }}
               </span>
             </td>
-            <td :class="['px-4 py-3 text-right font-medium', tx.type === 'credit' ? 'text-emerald-600' : 'text-rose-600', uiStore.isFinancialValueBlurred ? 'blur-sm select-none' : '']">
-              {{ tx.type === 'credit' ? '+' : '-' }}{{ formatBRL(tx.amount) }}
+            <td :class="['whitespace-nowrap px-4 py-3 text-right font-medium', tx.type === 'credit' ? 'text-emerald-600' : 'text-rose-600', blur]">
+              {{ tx.type === 'credit' ? '+' : '-' }}{{ formatBRL(Math.abs(Number(tx.amount))) }}
             </td>
           </tr>
         </tbody>
       </table>
+
+      <div v-if="totalPages > 1" class="flex items-center justify-between border-t border-sepia-200 px-4 py-3">
+        <button
+          type="button"
+          :disabled="!hasPrevious || loading"
+          class="rounded-lg border border-sepia-200 bg-white px-3 py-1.5 text-xs font-medium text-sepia-600 hover:bg-sepia-50 disabled:opacity-40"
+          @click="previous"
+        >
+          Anterior
+        </button>
+        <span class="text-xs text-sepia-500">Página {{ page }} de {{ totalPages }}</span>
+        <button
+          type="button"
+          :disabled="!hasNext || loading"
+          class="rounded-lg border border-sepia-200 bg-white px-3 py-1.5 text-xs font-medium text-sepia-600 hover:bg-sepia-50 disabled:opacity-40"
+          @click="next"
+        >
+          Próxima
+        </button>
+      </div>
     </div>
   </section>
 </template>

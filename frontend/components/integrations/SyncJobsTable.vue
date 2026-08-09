@@ -1,23 +1,20 @@
 <script setup lang="ts">
-const config = useRuntimeConfig()
-const token = useCookie<string | null>('access_token')
-const headers = token.value ? { Authorization: `Bearer ${token.value}` } : {}
+type SyncJobRow = {
+  id: number
+  connection: number
+  institution_name: string
+  kind: string
+  status: string
+  started_at: string | null
+  finished_at: string | null
+  error_message: string
+  created_at: string
+}
 
-const { data: jobs } = await useFetch<
-  {
-    id: number
-    connection: number
-    institution_name: string
-    kind: string
-    status: string
-    started_at: string | null
-    finished_at: string | null
-    error_message: string
-    created_at: string
-  }[]
->(`${config.public.apiBaseUrl}/sync-jobs/`, {
-  key: 'sync-jobs',
-  headers,
+// `/sync-jobs/` passou a vir paginado: a coleção cresce um registro por sync e
+// não tem teto natural.
+const { items: jobs, count } = usePaginatedList<SyncJobRow>('sync-jobs', '/sync-jobs/', {
+  pageSize: 20,
 })
 
 const statusColors: Record<string, string> = {
@@ -31,7 +28,7 @@ const formatTime = (d: string | null) => (d ? new Date(d).toLocaleString('pt-BR'
 </script>
 
 <template>
-  <div class="rounded-xl border border-sepia-200 bg-white shadow-sm">
+  <div class="overflow-hidden rounded-xl border border-sepia-200 bg-white shadow-sm">
     <div class="overflow-x-auto">
       <table class="w-full text-sm">
         <thead class="border-b border-sepia-200 bg-sepia-50">
@@ -45,10 +42,10 @@ const formatTime = (d: string | null) => (d ? new Date(d).toLocaleString('pt-BR'
           </tr>
         </thead>
         <tbody>
-          <tr v-if="!jobs?.length" class="border-b border-sepia-100">
+          <tr v-if="!jobs.length" class="border-b border-sepia-100">
             <td colspan="6" class="px-4 py-8 text-center text-sepia-400">Nenhuma sincronização registrada.</td>
           </tr>
-          <tr v-for="job in jobs?.slice(0, 20)" :key="job.id" class="border-b border-sepia-100 last:border-0">
+          <tr v-for="job in jobs" :key="job.id" class="border-b border-sepia-100 last:border-0">
             <td class="px-4 py-3 font-medium text-sepia-900">{{ job.institution_name }}</td>
             <td class="px-4 py-3">
               <span :class="['rounded-full px-2 py-0.5 text-xs font-medium', statusColors[job.status] || 'bg-sepia-100 text-sepia-600']">
@@ -66,5 +63,8 @@ const formatTime = (d: string | null) => (d ? new Date(d).toLocaleString('pt-BR'
         </tbody>
       </table>
     </div>
+    <p v-if="count > jobs.length" class="border-t border-sepia-200 px-4 py-2 text-xs text-sepia-400">
+      Mostrando {{ jobs.length }} de {{ count }} sincronizações.
+    </p>
   </div>
 </template>

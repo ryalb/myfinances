@@ -33,6 +33,12 @@ run = "cd backend && uv run python manage.py migrate"
 description = "Run Celery worker"
 run = "cd backend && uv run celery -A config worker -l info"
 
+[tasks.backend-beat]
+description = "Run Celery beat (agendador das tasks diarias)"
+# Sem esta task nada em CELERY_BEAT_SCHEDULE dispara: o worker so executa o que
+# alguem enfileira. O snapshot patrimonial diario depende dela.
+run = "cd backend && uv run celery -A config beat -l info --schedule=../tmp/celerybeat-schedule"
+
 [tasks.backend-lint]
 description = "Run Ruff checks"
 run = "cd backend && uv run ruff check . --fix"
@@ -107,12 +113,12 @@ depends = ["setup"]
 #
 # O `ngrok` NAO entra aqui de proposito: o tunel encaminha a porta inteira e
 # expoe a API na internet. Use `dev-tunnel` quando precisar receber webhooks.
-run = "mise run backend-dev ::: backend-worker ::: frontend-dev"
+run = "mise run backend-dev ::: backend-worker ::: backend-beat ::: frontend-dev"
 
 [tasks.dev-tunnel]
 description = "Dev stack + tunel ngrok (necessario para receber webhooks da Pluggy)"
 depends = ["setup"]
 # O middleware PublicTunnelRestrictionMiddleware limita o que o tunel alcanca,
 # desde que DJANGO_PUBLIC_TUNNEL_HOSTS esteja setado no .env.
-run = "mise run backend-dev ::: backend-worker ::: frontend-dev ::: ngrok"
+run = "mise run backend-dev ::: backend-worker ::: backend-beat ::: frontend-dev ::: ngrok"
 

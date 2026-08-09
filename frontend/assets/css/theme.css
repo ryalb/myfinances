@@ -3,6 +3,12 @@
 @tailwind utilities;
 
 :root {
+  /* Controle nativo (input, select, textarea) segue `color-scheme`, não as classes
+     do Tailwind. Sem fixar aqui, um SO em modo escuro desenha input preto sobre a
+     página clara, e a única pista no CSS da aplicação seria a ausência de
+     `background`. O app é claro por design — ver `body` abaixo. */
+  color-scheme: light;
+
   --color-sepia-50: #faf6f1;
   --color-sepia-100: #f0e6d8;
   --color-sepia-200: #e0ccb0;

@@ -37,7 +37,7 @@ const handleSubmit = async () => {
   <div class="flex min-h-screen w-full items-center justify-center bg-sepia-50">
     <div class="w-full max-w-sm rounded-xl border border-sepia-200 bg-white p-6 shadow-sm sm:p-8">
       <div class="mb-6 text-center">
-        <img src="/logo.png" alt="MyFinances" class="mx-auto h-20 w-auto"></img>
+        <img src="/logo.png" alt="MyFinances" class="mx-auto h-20 w-auto">
         <h1 class="text-2xl font-semibold text-sepia-900">MyFinances</h1>
         <p class="mt-1 text-sm text-sepia-500">Digite seu email e senha para acessar sua conta.</p>
       </div>

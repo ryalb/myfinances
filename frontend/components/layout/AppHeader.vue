@@ -74,6 +74,56 @@
         class="items-center justify-between w-full gap-4 px-5 py-4 lg:flex lg:justify-end lg:px-0"
       >
         <div class="flex items-center gap-2 2xsm:gap-3">
+          <!-- Central de alertas: derivados do estado atual, então desaparecem
+               quando a condição se resolve. -->
+          <div class="relative">
+            <button
+              type="button"
+              class="relative flex items-center justify-center w-10 h-10 text-sepia-700 rounded-lg hover:bg-sepia-100"
+              :title="count ? `${count} alerta(s)` : 'Nenhum alerta'"
+              @click="alertsOpen = !alertsOpen"
+            >
+              <Icon icon="mdi:bell-outline" class="h-5 w-5" />
+              <span
+                v-if="actionableCount"
+                class="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white"
+              >
+                {{ actionableCount }}
+              </span>
+              <span
+                v-else-if="count"
+                class="absolute right-2 top-2 h-2 w-2 rounded-full bg-sepia-400"
+              />
+            </button>
+
+            <div
+              v-if="alertsOpen"
+              class="absolute right-0 z-50 mt-2 w-80 rounded-xl border border-sepia-200 bg-white p-2 shadow-lg"
+            >
+              <p v-if="!count" class="px-3 py-6 text-center text-sm text-sepia-400">
+                Nada precisa da sua atenção agora.
+              </p>
+              <ul v-else class="space-y-1">
+                <li v-for="alert in alerts" :key="alert.kind">
+                  <NuxtLink
+                    :to="alert.actionPath"
+                    class="flex gap-2 rounded-lg px-3 py-2 hover:bg-sepia-50"
+                    @click="alertsOpen = false"
+                  >
+                    <Icon
+                      :icon="ALERT_STYLES[alert.severity].icon"
+                      :class="['mt-0.5 h-4 w-4 shrink-0', alert.severity === 'danger' ? 'text-rose-600' : alert.severity === 'warning' ? 'text-amber-600' : 'text-sepia-400']"
+                    />
+                    <span class="min-w-0">
+                      <span class="block text-sm font-medium text-sepia-900">{{ alert.title }}</span>
+                      <span class="block text-xs text-sepia-500">{{ alert.detail }}</span>
+                    </span>
+                  </NuxtLink>
+                </li>
+              </ul>
+            </div>
+          </div>
+
           <button
             type="button"
             class="flex items-center justify-center w-10 h-10 text-sepia-700 rounded-lg hover:bg-sepia-100"
@@ -102,11 +152,15 @@ import { useSidebar } from '@/composables/useSidebar'
 import { useAuth } from '@/composables/useAuth'
 import { useRouter } from 'vue-router'
 import { useUiStore } from '@/stores/ui'
+import { ALERT_STYLES } from '@/composables/useAlerts'
 
 const { toggleSidebar, toggleMobileSidebar, isMobileOpen } = useSidebar()
 const { logout } = useAuth()
 const router = useRouter()
 const uiStore = useUiStore()
+
+const { alerts, count, actionableCount } = useAlerts()
+const alertsOpen = ref(false)
 
 const handleToggle = () => {
   if (window.innerWidth >= 1024) {

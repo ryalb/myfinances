@@ -13,6 +13,7 @@ dependencies = [
   "djangorestframework-simplejwt>=5.3,<6.0",
   "djangorestframework>=3.15,<4.0",
   "graphene-django>=3.2,<4.0",
+  "pgvector>=0.3,<0.4",
   "pluggy-sdk>=1.0,<2.0",
   "psycopg[binary]>=3.2,<4.0",
   "python-dotenv>=1.0,<2.0",

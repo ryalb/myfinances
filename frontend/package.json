@@ -7,8 +7,9 @@
     "dev": "nuxt dev",
     "build": "nuxt build",
     "start": "nuxt start",
-    "lint": "eslint .",
-    "lint:fix": "eslint . --fix"
+    "lint": "eslint . && node scripts/audit-buttons.mjs",
+    "lint:fix": "eslint . --fix && node scripts/audit-buttons.mjs",
+    "audit:buttons": "node scripts/audit-buttons.mjs"
   },
   "dependencies": {
     "@iconify/vue": "^5.0.0",

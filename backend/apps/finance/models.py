@@ -1,5 +1,7 @@
 from django.conf import settings
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+from pgvector.django import HnswIndex, VectorField
 
 
 class TimeStampedModel(models.Model):
@@ -231,7 +233,12 @@ class Subscription(TimeStampedModel):
         default=SubscriptionCategory.OTHER,
     )
     amount = models.DecimalField(max_digits=16, decimal_places=2)
-    due_day = models.PositiveSmallIntegerField()
+    # Sem os validators, um due_day fora do calendario nao estoura: o
+    # `_due_date_for` do reconcile cai no dia 28 e o vencimento vira outro em
+    # silencio. O DRF herda estes validators e responde 400.
+    due_day = models.PositiveSmallIntegerField(
+        validators=[MinValueValidator(1), MaxValueValidator(31)]
+    )
     payment_account = models.ForeignKey(
         Account, on_delete=models.SET_NULL, null=True, blank=True, related_name="subscriptions"
     )
@@ -263,6 +270,13 @@ class DocumentChunkStatus(models.TextChoices):
     FAILED = "failed", "Failed"
 
 
+# nomic-embed-text produz 768 dimensoes. A coluna do pgvector tem dimensao fixa,
+# entao trocar OLLAMA_EMBEDDING_MODEL por um modelo de outra dimensao exige
+# migration. O RAGService confere o tamanho antes de gravar para a falha aparecer
+# como erro claro em vez de erro do banco.
+EMBEDDING_DIMENSIONS = 768
+
+
 class DocumentChunk(TimeStampedModel):
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="document_chunks"
@@ -270,6 +284,9 @@ class DocumentChunk(TimeStampedModel):
     source_type = models.CharField(max_length=50)
     source_id = models.CharField(max_length=255)
     content = models.TextField()
+    # Digest do conteudo. Serve para reindexar so o que mudou: sem isso cada
+    # relatorio gerado reembedava todos os dominios do usuario.
+    content_hash = models.CharField(max_length=64, blank=True)
     metadata = models.JSONField(default=dict, blank=True)
     status = models.CharField(
         max_length=20, choices=DocumentChunkStatus.choices, default=DocumentChunkStatus.PENDING
@@ -281,16 +298,37 @@ class DocumentChunk(TimeStampedModel):
         indexes = [
             models.Index(fields=["user", "source_type", "source_id"]),
         ]
+        # A trinca identifica o documento. Sem a constraint o `update_or_create`
+        # nao tem o que travar e duas requisicoes concorrentes recriam o chunk.
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "source_type", "source_id"],
+                name="unique_document_chunk_per_source",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.source_type}:{self.source_id}"
 
 
 class Embedding(TimeStampedModel):
     chunk = models.OneToOneField(DocumentChunk, on_delete=models.CASCADE, related_name="embedding")
-    vector = models.JSONField()
-    model = models.CharField(max_length=100, default="text-embedding-3-small")
+    vector = VectorField(dimensions=EMBEDDING_DIMENSIONS)
+    model = models.CharField(max_length=100, default="nomic-embed-text")
 
     class Meta:
         indexes = [
             models.Index(fields=["chunk"]),
+            # HNSW para distancia de cosseno: e o operador que a busca usa
+            # (`CosineDistance`). Um indice com a classe de operador errada e
+            # simplesmente ignorado pelo planner.
+            HnswIndex(
+                name="embedding_vector_hnsw",
+                fields=["vector"],
+                m=16,
+                ef_construction=64,
+                opclasses=["vector_cosine_ops"],
+            ),
         ]
 
 

@@ -100,7 +100,7 @@ const regenerateAuth = async () => {
         </div>
         <div class="flex gap-2">
           <Button
-            class="!rounded-lg !border !border-sepia-200 !px-3 !py-1.5 !text-xs !font-medium !text-sepia-600 hover:!bg-sepia-50"
+            class="!rounded-lg !border !border-sepia-200 !bg-white !px-3 !py-1.5 !text-xs !font-medium !text-sepia-600 hover:!bg-sepia-50"
             :disabled="regenerating"
             @click="regenerateAuth"
           >
@@ -131,7 +131,7 @@ const regenerateAuth = async () => {
           @keyup.enter="importItem"
         >
         <Button
-          class="!rounded-lg !border !border-sepia-200 !px-3 !py-1.5 !text-xs !font-medium !text-sepia-600 hover:!bg-sepia-50"
+          class="!rounded-lg !border !border-sepia-200 !bg-white !px-3 !py-1.5 !text-xs !font-medium !text-sepia-600 hover:!bg-sepia-50"
           :disabled="importing"
           @click="importItem"
         >

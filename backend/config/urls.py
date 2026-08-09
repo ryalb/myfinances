@@ -1,9 +1,9 @@
 from django.contrib import admin
 from django.urls import include, path
-from graphene_django.views import GraphQLView
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
 
+from apps.finance.graphql_view import JWTGraphQLView
 from apps.finance.views import (
     AccountViewSet,
     CardViewSet,
@@ -29,6 +29,7 @@ from apps.finance.views import (
     SubscriptionViewSet,
     SyncJobViewSet,
     ThrottledTokenObtainPairView,
+    TransactionCSVExportAPIView,
     TransactionViewSet,
 )
 
@@ -39,9 +40,7 @@ router.register(r"accounts", AccountViewSet, basename="account")
 router.register(r"transactions", TransactionViewSet, basename="transaction")
 router.register(r"cards", CardViewSet, basename="card")
 router.register(r"investments", InvestmentViewSet, basename="investment")
-router.register(
-    r"investment-positions", InvestmentPositionViewSet, basename="investment-position"
-)
+router.register(r"investment-positions", InvestmentPositionViewSet, basename="investment-position")
 router.register(r"pension-plans", PensionPlanViewSet, basename="pension-plan")
 router.register(r"sync-jobs", SyncJobViewSet, basename="sync-job")
 router.register(r"goals", FinancialGoalViewSet, basename="goal")
@@ -69,9 +68,7 @@ urlpatterns = [
         ThrottledTokenObtainPairView.as_view(),
         name="token_obtain_pair",
     ),
-    path(
-        "api/v1/auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"
-    ),
+    path("api/v1/auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
     path(
         "api/v1/pluggy/connect-token/",
         PluggyConnectTokenAPIView.as_view(),
@@ -93,9 +90,14 @@ urlpatterns = [
         name="pluggy-regenerate-auth",
     ),
     path(
+        "api/v1/export/transactions.csv",
+        TransactionCSVExportAPIView.as_view(),
+        name="export-transactions-csv",
+    ),
+    path(
         "api/v1/ai/portfolio-report/",
         PortfolioReportAPIView.as_view(),
         name="portfolio-report",
     ),
-    path("graphql/", GraphQLView.as_view(graphiql=True)),
+    path("graphql/", JWTGraphQLView.as_view(graphiql=True)),
 ]

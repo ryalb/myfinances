@@ -6,6 +6,12 @@ from decimal import Decimal
 from django.db.models import Q
 from django.utils.text import slugify
 
+from .categories import (
+    CATEGORY_EXPENSES,
+    CATEGORY_INCOME,
+    CATEGORY_UNCATEGORIZED,
+    translate_category,
+)
 from .models import Account, AccountType, CategorizationRule, FinancialInstitution, TransactionType
 
 logger = logging.getLogger(__name__)
@@ -42,7 +48,7 @@ def get_or_create_institution(item_data: dict) -> FinancialInstitution:
     return institution
 
 
-DEFAULT_CATEGORY = "uncategorized"
+DEFAULT_CATEGORY = CATEGORY_UNCATEGORIZED
 
 # Items do Meu Pluggy sempre chegam com connectorId=200 e connector.name="MeuPluggy",
 # qualquer que seja o banco por tras. Sem isto, todas as conexoes colapsam numa
@@ -157,8 +163,8 @@ def refine_connection_institution(connection) -> FinancialInstitution | None:
 
 
 CATEGORY_KEYWORDS: dict[str, tuple[str, ...]] = {
-    "housing": ("aluguel", "condominio", "iptu", "moradia", "imobiliaria", "condo"),
-    "food": (
+    "Moradia": ("aluguel", "condominio", "iptu", "moradia", "imobiliaria", "condo"),
+    "Alimentação": (
         "mercado",
         "supermercado",
         "restaurante",
@@ -169,7 +175,7 @@ CATEGORY_KEYWORDS: dict[str, tuple[str, ...]] = {
         "padaria",
         "cafe",
     ),
-    "transport": (
+    "Transporte": (
         "uber",
         "99",
         "combustivel",
@@ -179,9 +185,9 @@ CATEGORY_KEYWORDS: dict[str, tuple[str, ...]] = {
         "gasolina",
         "parcimetro",
     ),
-    "health": ("farmacia", "hospital", "clinica", "plano de saude", "medico", "unimed", "amil"),
-    "education": ("curso", "escola", "faculdade", "livro", "ensino", "treinamento"),
-    "entertainment": (
+    "Saúde": ("farmacia", "hospital", "clinica", "plano de saude", "medico", "unimed", "amil"),
+    "Educação": ("curso", "escola", "faculdade", "livro", "ensino", "treinamento"),
+    "Lazer": (
         "cinema",
         "streaming",
         "spotify",
@@ -191,8 +197,17 @@ CATEGORY_KEYWORDS: dict[str, tuple[str, ...]] = {
         "ingresso",
         "ticketmaster",
     ),
-    "investments": ("tesouro", "cdb", "fii", "acao", "fundos", "corretora", "broker", "dividend_"),
-    "salary": ("salario", "pro-labore", "holerite", "pagamento", "pix_recebido"),
+    "Investimentos": (
+        "tesouro",
+        "cdb",
+        "fii",
+        "acao",
+        "fundos",
+        "corretora",
+        "broker",
+        "dividend_",
+    ),
+    "Salário": ("salario", "pro-labore", "holerite", "pagamento", "pix_recebido"),
 }
 
 
@@ -215,31 +230,58 @@ def _match_keyword_category(description: str, provider_category: str) -> str | N
     return None
 
 
+def match_categorization_rule(description: str, provider_category: str, rules) -> str | None:
+    """Primeira regra que casa, na ordem de prioridade recebida.
+
+    Recebe `rules` ja materializado para a reaplicacao em lote poder ler as regras
+    uma unica vez em vez de uma query por transacao.
+    """
+    source = f"{description} {provider_category}".strip().lower()
+    for rule in rules:
+        if slugify(rule.pattern) in source or rule.pattern.lower() in source:
+            return rule.category
+    return None
+
+
+def active_categorization_rules(user):
+    return list(
+        CategorizationRule.objects.filter(
+            Q(user=user) | Q(user__isnull=True),
+            is_active=True,
+        ).order_by("priority", "-created_at")
+    )
+
+
 def normalize_transaction_category(
     description: str,
     provider_category: str,
     tx_type: str,
     user=None,
+    rules=None,
 ) -> str:
-    if provider_category and provider_category.lower() not in ("uncategorized", "none"):
-        return provider_category
+    # Regra do usuario vem primeiro, antes do `provider_category`.
+    #
+    # A ordem era o inverso, e isso fazia o motor de regras parecer quebrado: uma
+    # regra "uber -> transporte" nunca se aplicava porque a Pluggy manda "Travel",
+    # ou seja, intencao explicita do usuario perdia para heuristica do provedor.
+    if user is not None or rules is not None:
+        applicable = active_categorization_rules(user) if rules is None else rules
+        matched = match_categorization_rule(description, provider_category, applicable)
+        if matched:
+            return matched
 
-    if user is not None:
-        rules = CategorizationRule.objects.filter(
-            Q(user=user) | Q(user__isnull=True),
-            is_active=True,
-        ).order_by("priority", "-created_at")
-        source = f"{description} {provider_category}".strip().lower()
-        for rule in rules:
-            if slugify(rule.pattern) in source or rule.pattern.lower() in source:
-                return rule.category
+    if provider_category and provider_category.lower() not in ("uncategorized", "none"):
+        # A taxonomia da Pluggy e em ingles; traduz na entrada para que tela,
+        # export, filtro e relatorio de IA mostrem o mesmo texto em pt-BR.
+        # `provider_category` guarda o valor cru como trilha de origem.
+        return translate_category(provider_category)
 
     keyword_category = _match_keyword_category(description, provider_category)
     if keyword_category:
         return keyword_category
 
     if tx_type == TransactionType.CREDIT:
-        return "income"
+        return CATEGORY_INCOME
     if tx_type == TransactionType.DEBIT:
-        return "expenses"
+        return CATEGORY_EXPENSES
     return DEFAULT_CATEGORY

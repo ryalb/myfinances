@@ -3,6 +3,7 @@ import os
 import sys
 from pathlib import Path
 
+from celery.schedules import crontab
 from dotenv import load_dotenv
 from rich.console import Console
 from rich.logging import RichHandler
@@ -44,12 +45,12 @@ class StreamToLogger:
     def encoding(self):
         return getattr(self._sys_stdout, "encoding", "utf-8")
 
+
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "unsafe-dev-key")
 DEBUG = os.getenv("DJANGO_DEBUG", "False").lower() == "true"
 
 ALLOWED_HOSTS = [
-    h.strip()
-    for h in os.getenv("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
+    h.strip() for h in os.getenv("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
 ]
 
 INSTALLED_APPS = [
@@ -85,9 +86,7 @@ MIDDLEWARE = [
 # O tunel encaminha a porta inteira, entao sem isto expor o webhook expoe
 # tambem /admin/, /graphql/ e /api/v1/auth/token/.
 PUBLIC_TUNNEL_HOSTS = [
-    h.strip()
-    for h in os.getenv("DJANGO_PUBLIC_TUNNEL_HOSTS", "").split(",")
-    if h.strip()
+    h.strip() for h in os.getenv("DJANGO_PUBLIC_TUNNEL_HOSTS", "").split(",") if h.strip()
 ]
 
 PUBLIC_TUNNEL_ALLOWED_PATHS = (
@@ -97,9 +96,7 @@ PUBLIC_TUNNEL_ALLOWED_PATHS = (
 
 # Uso pessoal: o registro publico nasce desligado. Ligar permite que qualquer
 # pessoa com acesso a API crie uma conta.
-ALLOW_PUBLIC_REGISTRATION = (
-    os.getenv("DJANGO_ALLOW_PUBLIC_REGISTRATION", "False").lower() == "true"
-)
+ALLOW_PUBLIC_REGISTRATION = os.getenv("DJANGO_ALLOW_PUBLIC_REGISTRATION", "False").lower() == "true"
 
 ROOT_URLCONF = "config.urls"
 
@@ -190,6 +187,22 @@ CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
 
+# Precisa de `celery -A config beat` rodando (mise run backend-beat), senao
+# nada aqui dispara. As duas tasks sao idempotentes por dia, entao um beat que
+# ficou fora do ar so perde pontos do periodo -- reexecutar nao duplica nada.
+CELERY_BEAT_SCHEDULE = {
+    "snapshot-patrimonio-diario": {
+        "task": "apps.finance.tasks.snapshot_all_users",
+        # 03:10 local: depois da janela de auto-sync noturna da Pluggy, para o
+        # snapshot pegar os saldos do dia anterior ja atualizados.
+        "schedule": crontab(hour=3, minute=10),
+    },
+    "reconciliar-assinaturas-diario": {
+        "task": "apps.finance.tasks.reconcile_all_subscriptions",
+        "schedule": crontab(hour=3, minute=30),
+    },
+}
+
 CHANNEL_LAYERS = {
     "default": {
         "BACKEND": "channels_redis.core.RedisChannelLayer",
@@ -245,4 +258,3 @@ logging.captureWarnings(True)
 
 if "test" not in sys.argv:
     sys.stdout = StreamToLogger()
-
