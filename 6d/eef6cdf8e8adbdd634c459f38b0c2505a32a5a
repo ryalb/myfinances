@@ -1,0 +1,357 @@
+frontend/components/dashboard/SubscriptionsOverview.vue
+  s_ae26d445bd119e::t_83b98ec9b4f3f4 89
+  s_ae26d445bd119e::t_6a8394e22772af 1-88,90-102
+backend/apps/finance/tests/test_ai_report.py
+  s_ae26d445bd119e::t_c40ec547951138 1-18,20-151,153,228-237,239-250,252-268,270-273
+  s_ae26d445bd119e::t_a0925dab02725f 19
+  s_ae26d445bd119e::t_a6bb1c07e8a499 251,269
+  s_ae26d445bd119e::t_3f2d2b3946d16c 152,154-227
+  s_ae26d445bd119e::t_c7b4262d6469a2 238
+mise.toml
+  s_ae26d445bd119e::t_d949550e95f0ab 116,123
+  s_ae26d445bd119e::t_44df0fb0da0ac7 36-41
+frontend/composables/useFinancialFreedom.ts
+  s_ae26d445bd119e::t_b8d9d310a69ef7 1-32,38,42,50,53
+frontend/composables/useApi.ts
+  s_ae26d445bd119e::t_2bcf36d10031b5 11-12,18-20
+  s_ae26d445bd119e::t_2246a962856edc 1-9
+  s_ae26d445bd119e::t_fb8ce56d63ab35 85-96,98-104,108
+  s_ae26d445bd119e::t_333b3e35ab8d7a 10,13-17,21-29,62-65,68-69,73-77,81-83
+backend/apps/finance/domain.py
+  s_ae26d445bd119e::t_78b58d8c174b07 51
+  s_ae26d445bd119e::t_582077fae302b0 233-254,260,262-271
+  s_ae26d445bd119e::t_d2f5259fe9947a 9-14
+  s_ae26d445bd119e::t_cb6bd72a378ad4 166-167
+  s_ae26d445bd119e::t_f72aef67b4401e 178,188-190,200-210
+  s_ae26d445bd119e::t_7eba80b02ee232 274-277,284,286
+  s_ae26d445bd119e::t_3615d4ec732cc5 273
+frontend/package.json
+  s_ae26d445bd119e::t_87b6785b0bfd91 10-12
+frontend/composables/useSubscriptionOverview.ts
+  s_ae26d445bd119e::t_d7ab36cedb8ffc 1-68
+frontend/components/goals/CreateGoalModal.vue
+  s_ae26d445bd119e::t_c30e85b9234374 113
+backend/apps/finance/views.py
+  s_ae26d445bd119e::t_b3f6ebaf958277 728
+  s_ae26d445bd119e::t_4edb948a6cebe0 619-644,649-650,654-698
+  s_ae26d445bd119e::t_4198dc5d9a6e8f 25-29
+  s_ae26d445bd119e::t_005fc4ed885210 48
+  s_ae26d445bd119e::t_ac7b025c18ce33 168
+  s_ae26d445bd119e::t_5116e340537a2f 171-189
+  s_ae26d445bd119e::t_4d175efe338654 645-648,651-653
+  s_ae26d445bd119e::t_6dd47e337b949f 704,706-708,710,716-727,729,733-736
+  s_ae26d445bd119e::t_b74695f63376bc 30
+  s_ae26d445bd119e::t_1228dbbe601551 1,10
+  s_ae26d445bd119e::t_ab769b127b8cd6 578-617
+  s_ae26d445bd119e::t_c2215ef2875150 711-715,730-732
+  s_ae26d445bd119e::t_76e077dcd53a0a 233,236-238,240
+  s_ae26d445bd119e::t_d4faaef36e320e 618
+backend/apps/finance/pagination.py
+  s_ae26d445bd119e::t_b0f3525ec4c6cb 1-18
+backend/apps/finance/tasks.py
+  s_ae26d445bd119e::t_9fdfd439fd6fe5 289-302
+  s_ae26d445bd119e::t_d993386e7a2135 57,64-74,76,80
+  s_ae26d445bd119e::t_e5f45c3f44a4fa 273-288,303-318,338-348
+  s_ae26d445bd119e::t_361d9c69a7f19f 320-325
+  s_ae26d445bd119e::t_8faa946e9c39ea 319,326
+  s_ae26d445bd119e::t_17b84f6432cb1e 495-511
+  s_ae26d445bd119e::t_6dcd78dcfd023b 490-494,526-528
+  s_ae26d445bd119e::t_3cc60ef268ff1c 587-627
+frontend/pages/dashboard.vue
+  s_ae26d445bd119e::t_6c228f5f3a9638 11
+  s_ae26d445bd119e::t_08270e78b013cd 12
+  s_ae26d445bd119e::t_85e9166c54bd8d 83
+  s_ae26d445bd119e::t_485bdb03582e7f 55-56,61,63-64
+  s_ae26d445bd119e::t_c04cc894142362 89-97
+backend/apps/finance/migrations/0009_documentchunk_content_hash_alter_embedding_model_and_more.py
+  s_ae26d445bd119e::t_b3e1ced836a2c9 1,3-7,9-10,20,29-34,40-49,59-80
+  s_ae26d445bd119e::t_41d6f7ba92b11a 2,14-16,18-19,21-22,24,50-58
+  s_ae26d445bd119e::t_2d78f2bdd0d587 8,11-13,17,23,25-28,35-39
+frontend/composables/useSubscriptionLabels.ts
+  s_ae26d445bd119e::t_accbf3974d4816 13-17
+  s_ae26d445bd119e::t_49dac321f5d191 1-12,18-29,37-39
+  s_ae26d445bd119e::t_2f8016e301d71f 30-36
+backend/apps/finance/tests/test_transaction_filters.py
+  s_ae26d445bd119e::t_8c093a23345c01 1-237
+frontend/pages/login.vue
+  s_ae26d445bd119e::t_484ed909fd8b72 40
+backend/apps/finance/categories.py
+  s_ae26d445bd119e::t_2863912b6e5c88 1-183
+backend/apps/finance/tests/test_categorization_rules.py
+  s_ae26d445bd119e::t_763dc3842bb40b 1-232
+frontend/components/layout/AppSidebar.vue
+  s_ae26d445bd119e::t_53eb0b57236f5d 70-73
+  s_ae26d445bd119e::t_6d612a1bab4292 150
+backend/apps/finance/tests/test_amount_and_categories.py
+  s_ae26d445bd119e::t_ea7e59bb74fc22 38,126
+  s_ae26d445bd119e::t_54209d8357990f 1-37,39-125,127-268
+frontend/components/integrations/ConnectionItem.vue
+  s_ae26d445bd119e::t_e02ee4fb74d3f4 19,30,33-34,43,46-47,49-50
+  s_ae26d445bd119e::t_55dbadf5c1a320 86
+  s_ae26d445bd119e::t_4c117a5cb7a02b 93
+  s_ae26d445bd119e::t_779e3a1be201e7 3
+  s_ae26d445bd119e::t_c3b3f37651c15b 79-81
+backend/apps/finance/tests/test_periodic_tasks.py
+  s_ae26d445bd119e::t_679f48fa287ad1 86-88,127,151-153
+  s_ae26d445bd119e::t_8f933e9fb32448 1-85,89-126,128-150
+backend/apps/finance/migrations/0008_alter_subscription_due_day.py
+  s_ae26d445bd119e::t_85dbb260b31f0d 1-23
+backend/apps/finance/graphql_view.py
+  s_ae26d445bd119e::t_d03dc72255c913 60
+  s_ae26d445bd119e::t_ae17694a7d12f6 1-38,53-59
+  s_ae26d445bd119e::t_f08d57a9079c57 39-52
+backend/apps/finance/tests/test_graphql_endpoint.py
+  s_ae26d445bd119e::t_912b182f2628ff 1-135
+backend/apps/finance/tests/test_export.py
+  s_ae26d445bd119e::t_1a70c145adb4fd 176
+  s_ae26d445bd119e::t_8c65ecae3be9dd 1-175,177-189
+backend/pyproject.toml
+  s_ae26d445bd119e::t_5bf9f787d3447c 16
+backend/apps/finance/tests/test_public_exposure.py
+  s_ae26d445bd119e::t_df8d592d5cf793 62
+backend/apps/finance/tests/test_rag_index.py
+  s_ae26d445bd119e::t_f928bbd96c5270 175-208
+  s_ae26d445bd119e::t_29f01524e2e9bd 1-124,126-174,209-274,278-394
+  s_ae26d445bd119e::t_c9cb770dd4ab08 125,275-277
+frontend/pages/ai-report.vue
+  s_ae26d445bd119e::t_ab464a8f653d50 3,9-10,12-44,46-54,59-80,82-85,87-89,92-94,96-98,101-167
+  s_ae26d445bd119e::t_7710fc5c994365 81
+backend/apps/finance/alerts.py
+  s_ae26d445bd119e::t_a9359b39e4455f 56
+  s_ae26d445bd119e::t_d1a933260f2fd2 1-55,57-128
+frontend/components/layout/AppHeader.vue
+  s_ae26d445bd119e::t_e810a21d36689e 77-126
+  s_ae26d445bd119e::t_c8fe817560d1d6 155,162-163
+  s_ae26d445bd119e::t_e5b06a61216052 164
+backend/apps/finance/serializers.py
+  s_ae26d445bd119e::t_0b5beff4639b8f 178-203,205-208,226-237
+frontend/pages/subscriptions.vue
+  s_ae26d445bd119e::t_fe3d4a6294852a 21
+  s_ae26d445bd119e::t_d4d7b33430da78 177,179-180
+  s_ae26d445bd119e::t_f2ee616e44a89f 2,5-6,12-19,23-36,39-41,44-76,81-97,102,106-111,114-121,123-159,172,183,186-198,206-211
+  s_ae26d445bd119e::t_1d0936ee135e50 20
+  s_ae26d445bd119e::t_b51b60301b132f 22
+frontend/pages/rules.vue
+  s_ae26d445bd119e::t_fdfeec1c29a465 167
+  s_ae26d445bd119e::t_1020221c753894 1-49,54-98,100-166,168-186,188-193,195-230
+  s_ae26d445bd119e::t_31340d796e658d 194
+  s_ae26d445bd119e::t_538f9dbcd5f5ba 99
+  s_ae26d445bd119e::t_6a8b3ea3f13724 50-53
+  s_ae26d445bd119e::t_0330d8bdff71ea 187
+frontend/composables/usePaginatedList.ts
+  s_ae26d445bd119e::t_2bc6cff332d53b 1-5,7-14,16-19,38-39,42-59,74
+  s_ae26d445bd119e::t_d90ed1e2d6e9b4 6,15,20-37,40-41,60-73
+frontend/components/integrations/SyncJobsTable.vue
+  s_ae26d445bd119e::t_bb4aea21671862 31
+  s_ae26d445bd119e::t_78338539e45906 66-68
+  s_ae26d445bd119e::t_80ce57c45c84a9 2-12,14-17
+  s_ae26d445bd119e::t_283ecd51b13098 45,48
+frontend/components/subscriptions/SubscriptionFormModal.vue
+  s_ae26d445bd119e::t_a647789ed4faba 1-190,192-227
+  s_ae26d445bd119e::t_9251678595ed3f 191
+frontend/composables/useCategorizationRules.ts
+  s_ae26d445bd119e::t_2676851815d295 1-51
+backend/apps/finance/models.py
+  s_ae26d445bd119e::t_4f387c425512e3 4
+  s_ae26d445bd119e::t_5ef91ec160348b 2
+  s_ae26d445bd119e::t_ef2e51c10ce28c 236-241
+  s_ae26d445bd119e::t_65d2e099358340 273-279,287-289,301-311,316-317,322-331
+backend/apps/finance/consolidation.py
+  s_ae26d445bd119e::t_3e52f5a12add30 1
+  s_ae26d445bd119e::t_914bf3528dd77e 138-140
+  s_ae26d445bd119e::t_abbdb6b12aed02 222-262
+  s_ae26d445bd119e::t_2af7e1a856e40c 209-221
+  s_ae26d445bd119e::t_55791da7da09d3 16-17
+  s_ae26d445bd119e::t_fdc4c44aa49e1f 120-137,141-208
+  s_ae26d445bd119e::t_1b0bf2e493b670 2
+backend/apps/finance/tests/test_performance.py
+  s_ae26d445bd119e::t_754199c4f608a0 1-16,22-57,82-196,216-295,297-316
+  s_ae26d445bd119e::t_fdbc09d40ed2f0 17-21
+  s_ae26d445bd119e::t_3d82c492fbebb2 70-71,79
+  s_ae26d445bd119e::t_a14e224ae79a66 197-210,214-215
+  s_ae26d445bd119e::t_d2f5259fe9947a 211-213
+  s_ae26d445bd119e::t_e50d028941d294 296
+  s_ae26d445bd119e::t_40691dd36fb781 58-69,72-78,80-81
+backend/config/settings.py
+  s_ae26d445bd119e::t_679f48fa287ad1 48,53,89,99
+  s_ae26d445bd119e::t_424f0ca8d79e0e 6
+  s_ae26d445bd119e::t_e3dce189f27fa3 190-205
+frontend/plugins/primevue.ts
+  s_ae26d445bd119e::t_e073c46ed043ff 2,5-27,31-43
+frontend/composables/useAiReport.ts
+  s_ae26d445bd119e::t_be42ee386df9f9 1-62
+backend/apps/finance/migrations/0010_transaction_amount_magnitude.py
+  s_ae26d445bd119e::t_1e5c04c208ab19 1-11,15-24,26-28
+  s_ae26d445bd119e::t_f9c504c1f031f0 12-14,25
+backend/apps/finance/tests/test_subscription_overview.py
+  s_ae26d445bd119e::t_655a50ce81dfad 1-245
+backend/apps/finance/graphql.py
+  s_ae26d445bd119e::t_755769bcf62111 7
+  s_ae26d445bd119e::t_4c8a7ca87f63e2 437-438,440-465
+  s_ae26d445bd119e::t_7e376956171fa8 155-162
+  s_ae26d445bd119e::t_a51f79024ff6c6 202
+  s_ae26d445bd119e::t_0fb89e20a8aef1 137-154
+  s_ae26d445bd119e::t_19960237a68d30 8,10,12-14
+  s_ae26d445bd119e::t_cfd9f92eed86e7 376
+  s_ae26d445bd119e::t_6b156b324c2aaa 466-471
+  s_ae26d445bd119e::t_4fab1e4bed72e1 163-182
+  s_ae26d445bd119e::t_5d5e8dc3b17152 185
+  s_ae26d445bd119e::t_eaaab81abe6624 304-306
+  s_ae26d445bd119e::t_8f0e314925d4bb 309-315
+  s_ae26d445bd119e::t_e20aec4ef3c60b 439
+  s_ae26d445bd119e::t_dae5b282a59114 11
+  s_ae26d445bd119e::t_0cac557787452d 194-201
+  s_ae26d445bd119e::t_447ff9c668705f 203
+  s_ae26d445bd119e::t_697e973bf4ada2 227-229
+  s_ae26d445bd119e::t_2cd78103f3145b 9
+  s_ae26d445bd119e::t_b3112c749af3bd 427-432
+README.md
+  s_ae26d445bd119e::t_f9b3a45e1f92cd 314-323
+  s_ae26d445bd119e::t_98a3a547e89c84 287-289
+  s_ae26d445bd119e::t_07ace666d3639e 337-339
+  s_ae26d445bd119e::t_910749a5ddf214 291-295,308-313,324-336,367
+  s_ae26d445bd119e::t_58c7c2bdf37913 53,57-58,65-66,69,75-87
+  s_ae26d445bd119e::t_5d5c9aaf4a1c0f 247-248,251-252,254,258-259,265-269,275-286,290,379-381
+  s_ae26d445bd119e::t_6351ae6ea4769f 242-245
+  s_ae26d445bd119e::t_8f97ab9e5c1b20 253,255-257,260-264
+  s_ae26d445bd119e::t_3dbabbf0c0309c 296-307
+  s_ae26d445bd119e::t_4675b6ed5ff1db 340-366
+  s_ae26d445bd119e::t_df40daa830791c 170
+  s_ae26d445bd119e::t_a162b5e2177aa2 270-274
+  s_ae26d445bd119e::t_552d0bc184640a 88
+frontend/composables/useAlerts.ts
+  s_ae26d445bd119e::t_bd594cef68ec8b 1-55
+frontend/assets/css/theme.css
+  s_ae26d445bd119e::t_e889aaa6902490 6-11
+frontend/composables/useSubscriptions.ts
+  s_ae26d445bd119e::t_5344fc27a1bb2d 1-94
+backend/apps/finance/tests/test_pension_sync.py
+  s_ae26d445bd119e::t_115d4339032164 125-127,155-157
+  s_ae26d445bd119e::t_56df909582e933 191-272
+  s_ae26d445bd119e::t_62e4c41c839e4b 1-124,128-154,158-190
+frontend/components/dashboard/CashFlowChart.vue
+  s_ae26d445bd119e::t_0bb1799655d205 2-3,11-12,16-21,32-36,39-40,43,45-53,55-56,58-60,63-65,68-69
+frontend/scripts/audit-buttons.mjs
+  s_ae26d445bd119e::t_02152bde990c58 1-50
+plan.md
+  s_ae26d445bd119e::t_dcd062c89a2d68 485,489-490,494-499
+  s_ae26d445bd119e::t_d2124850eb368e 727-739
+  s_ae26d445bd119e::t_35efed0348eda5 435-437,440-445,448-476
+  s_ae26d445bd119e::t_aeafffafd8c493 912-916,923-924
+  s_ae26d445bd119e::t_c0f4938c43208f 892-895
+  s_ae26d445bd119e::t_38e3214a34a4c0 925
+  s_ae26d445bd119e::t_68fed3e17089f6 927-930
+  s_ae26d445bd119e::t_4f94267dc22fd0 873-875,883-886,903
+  s_ae26d445bd119e::t_e8ff5387c86b40 374-393
+  s_ae26d445bd119e::t_a8882beb664276 677,679-683
+  s_ae26d445bd119e::t_1c2323f1b1fcb5 887
+  s_ae26d445bd119e::t_a5ae7894c0aa46 46-68
+  s_ae26d445bd119e::t_28fea046712774 888-891,902
+  s_ae26d445bd119e::t_4cb22f1e0228ab 255-259
+  s_ae26d445bd119e::t_a5a618f4420cca 896-901
+  s_ae26d445bd119e::t_813f95966bb8b4 921-922
+  s_ae26d445bd119e::t_9446d6ad2f187d 759-761,772-801
+  s_ae26d445bd119e::t_2bbab1ad01f2ba 678
+  s_ae26d445bd119e::t_228fc9f1f0a20b 297-298,300-303,342-373,394-413
+  s_ae26d445bd119e::t_7fa9639b450034 527-532
+  s_ae26d445bd119e::t_f9fc4b8100db82 439,446-447
+  s_ae26d445bd119e::t_47babdcf64a097 247-254,260,266-277,279-293
+  s_ae26d445bd119e::t_39ac98f10e837f 919-920
+  s_ae26d445bd119e::t_1a3bf68a49de1a 926
+  s_ae26d445bd119e::t_1d124505416e31 870-872
+  s_ae26d445bd119e::t_3c042deade8450 478-484,486-488,491-493,500-525
+  s_ae26d445bd119e::t_854876e596df75 184-204
+  s_ae26d445bd119e::t_3bf452009c8255 417
+  s_ae26d445bd119e::t_a1e47c5bfb7fd2 299,304-341
+  s_ae26d445bd119e::t_0be071503a50e2 205-224
+  s_ae26d445bd119e::t_d22f6968c0439d 640-673
+  s_ae26d445bd119e::t_a031e6f1926f78 637-639,674-676,684-696
+  s_ae26d445bd119e::t_cad6a266e09a3e 821-824
+  s_ae26d445bd119e::t_5cd56ca74cfa4b 917-918
+  s_ae26d445bd119e::t_d05a96310dac6f 434,477,526
+  s_ae26d445bd119e::t_5ff620d2cc868c 593-608
+  s_ae26d445bd119e::t_b0840f4c4ab2fd 857-862
+  s_ae26d445bd119e::t_7df0810cd1a5bd 802
+frontend/composables/useDashboardMetrics.ts
+  s_ae26d445bd119e::t_b15af14fb84271 33-35
+  s_ae26d445bd119e::t_49503b46d6a0ea 23-31,36-37,46-48
+frontend/pages/integrations.vue
+  s_ae26d445bd119e::t_a4cd5f68cb9908 103
+  s_ae26d445bd119e::t_7c32f5c41148e4 134
+backend/apps/finance/management/commands/pluggy_dump_investments.py
+  s_ae26d445bd119e::t_15da628b864f2a 15
+  s_ae26d445bd119e::t_ecac9be6ecff6f 60-65,69
+  s_ae26d445bd119e::t_3b10b50d4483d2 1-14,16-59,66-68,70-74
+frontend/pages/transactions.vue
+  s_ae26d445bd119e::t_37ab5aee3418c9 10-17,56,58-67,72,99,137,153,220,242,262-266,268-275,277-281
+  s_ae26d445bd119e::t_ec1639e3956512 4
+  s_ae26d445bd119e::t_bec4499ee1ed61 19-55,57,68-71,73-97,108-112,114-117,126,130-131,136,139-142,146,158-185,187-218,222-227,243,256,267,276
+  s_ae26d445bd119e::t_47f3bef5f589e7 138,143-145,147-152,154-157
+  s_ae26d445bd119e::t_9f9c68285b2df3 252
+  s_ae26d445bd119e::t_aaf1515e495095 230
+  s_ae26d445bd119e::t_4802ea5600be84 100-107,113,118-123
+  s_ae26d445bd119e::t_300f8318291c11 246
+  s_ae26d445bd119e::t_def22a3d068296 257
+  s_ae26d445bd119e::t_3119e57173dba3 18
+  s_ae26d445bd119e::t_bff55174a6adf7 98
+  s_ae26d445bd119e::t_e7054c8c6afae4 219
+backend/apps/finance/tests/test_subscription_write_authorization.py
+  s_ae26d445bd119e::t_fdf7858e3edc7a 1-32,77-279
+  s_ae26d445bd119e::t_6b7354bf08cb0e 33-76
+  s_ae26d445bd119e::t_e2e7f2b4ef370b 280-307
+backend/apps/finance/filters.py
+  s_ae26d445bd119e::t_88570cbadc067b 1-77
+backend/apps/finance/tests/test_graphql_schema.py
+  s_ae26d445bd119e::t_6be79b30402129 1-23,25-40,43-183,231-246
+  s_ae26d445bd119e::t_82ac6974deee27 42
+  s_ae26d445bd119e::t_93a0f12dff26ff 24
+  s_ae26d445bd119e::t_6d2035b39046c0 184-230
+  s_ae26d445bd119e::t_04f74225a8c5b8 41
+backend/config/urls.py
+  s_ae26d445bd119e::t_1408aac9af5f11 6
+  s_ae26d445bd119e::t_d03dc72255c913 43,71
+  s_ae26d445bd119e::t_bd125f109272a5 32
+  s_ae26d445bd119e::t_ab14793526131f 93-96
+  s_ae26d445bd119e::t_fdfb1bcbc70515 102
+  s_ae26d445bd119e::t_195c90e63190f1 92
+backend/apps/finance/tests/test_alerts.py
+  s_ae26d445bd119e::t_dce076bd972c64 1-265
+backend/apps/finance/ai_services.py
+  s_ae26d445bd119e::t_d1272b3d1c73f4 692,694,701-702,705
+  s_ae26d445bd119e::t_7a45687e04dfd4 507
+  s_ae26d445bd119e::t_e5aeb3bd1bf56e 43,48-82,85-90,92-106,108-129,136-137
+  s_ae26d445bd119e::t_f5fe7d7b55dc02 130-135
+  s_ae26d445bd119e::t_3621f823c86cd2 485-506,508-512,517-518,521-526
+  s_ae26d445bd119e::t_c9cb770dd4ab08 231-233,242,598
+  s_ae26d445bd119e::t_636f4986428dc9 91
+  s_ae26d445bd119e::t_019b8c08ac302c 668
+  s_ae26d445bd119e::t_997485aa5011cb 670
+  s_ae26d445bd119e::t_2dd9f84bfb2bc3 8
+  s_ae26d445bd119e::t_1e33ddebcc0fd9 536,538-539,543
+  s_ae26d445bd119e::t_56e6ac1dbc8986 533
+  s_ae26d445bd119e::t_d4b28fab505e0b 707,711-713
+  s_ae26d445bd119e::t_18ad7bb94ef8f2 513-516
+  s_ae26d445bd119e::t_5110a29ce83402 31
+  s_ae26d445bd119e::t_77b7bfebc853a9 107
+  s_ae26d445bd119e::t_4bbbf5b4d8e24e 373-375,377-378,388-390,392-400,402-406,408-418,420-428,430-431,433-435,439,444,455
+  s_ae26d445bd119e::t_174254e2a1e114 1,3,5-6,11-13,15,17,29-30,34,36-42,44-47,138-164,166,169,171-176,178-194,197-198,200-206,208-212,215-216,218-223,225-230,234-236,238-240,244-249,252-271,274,276,278-279,281-317,319-327,329-336,338-344,348-372,376,379-387,391,401,407,419,429,432,436-438,440-443,445-454,456-482,544-597,599-608,610,612-627,629-633,635-643,645-661,672-673,680-681,704,708-710,714-721,723-726
+  s_ae26d445bd119e::t_889bcb65e2df39 483-484
+backend/uv.lock
+  s_ae26d445bd119e::t_1889a4877cfc86 556,586,605-623,633-644
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "6deef6cdf8e8adbdd634c459f38b0c2505a32a5a",
+  "prompts": {},
+  "sessions": {
+    "s_ae26d445bd119e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ad4d32a6-a38e-4504-a16c-d0f63e96d196",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Ryan Leite Albuquerque <ryan_albuquerque@apple.com>"
+    }
+  }
+}
