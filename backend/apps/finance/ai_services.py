@@ -2,6 +2,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
@@ -23,6 +24,7 @@ from .models import (
     DocumentChunkStatus,
     Embedding,
     FinancialGoal,
+    Identity,
     Investment,
     InvestmentPosition,
     PensionPlan,
@@ -83,6 +85,30 @@ def assert_local_inference(url: str) -> None:
     )
 
 
+def _is_numeric_noise(text: str) -> bool:
+    """Numero cru ou codigo de moeda: ruido quando ha texto descritivo ao lado.
+
+    O modelo por vezes devolve `{"texto": "...", "valor": 328137.21, "moeda": "BRL"}`
+    onde o contrato pede uma string. Sem este filtro o item achatado virava
+    "texto — 328137.21 — BRL", repetindo em numero cru o que a frase ja diz (e,
+    quando o campo em si e um dict como esse, virava so os numeros sem frase
+    nenhuma).
+    """
+    if re.fullmatch(r"[A-Z]{3}", text):
+        return True
+    try:
+        float(text)
+        return True
+    except ValueError:
+        return False
+
+
+def _flatten_dict(value: dict) -> str:
+    parts = [_as_text(part) for part in value.values() if _as_text(part)]
+    descriptive = [part for part in parts if not _is_numeric_noise(part)]
+    return " — ".join(descriptive or parts)
+
+
 def _as_text(value) -> str:
     if value is None:
         return ""
@@ -91,7 +117,7 @@ def _as_text(value) -> str:
     if isinstance(value, list | tuple):
         return " ".join(_as_text(item) for item in value if _as_text(item))
     if isinstance(value, dict):
-        return " ".join(_as_text(item) for item in value.values() if _as_text(item))
+        return _flatten_dict(value)
     return str(value)
 
 
@@ -109,12 +135,9 @@ def _as_list(value) -> list[str]:
 
     items = []
     for item in value:
-        if isinstance(item, dict):
-            # `[{"acao": ..., "motivo": ...}]` acontece. Renderizar como
-            # "[object Object]" seria pior que achatar em texto.
-            text = " — ".join(_as_text(part) for part in item.values() if _as_text(part))
-        else:
-            text = _as_text(item)
+        # `[{"acao": ..., "motivo": ...}]` acontece. Renderizar como
+        # "[object Object]" seria pior que achatar em texto.
+        text = _flatten_dict(item) if isinstance(item, dict) else _as_text(item)
         if text:
             items.append(text)
     return items
@@ -159,21 +182,53 @@ def _month_key(value: date) -> str:
     return f"{value.year}-{value.month:02d}"
 
 
+def _format_amount(value, currency: str = "BRL") -> str:
+    """Numero no padrao brasileiro: milhar '.', decimal ',', prefixo 'R$' quando BRL.
+
+    Este texto vai direto pro prompt da LLM. Um modelo pequeno tende a copiar a
+    formatacao que ve no contexto; sem isto ele copiava o `str(Decimal)` cru
+    (`328137.21`) e "corrigia" por conta propria para o padrao americano
+    (`328,137.21`) -- o oposto do que a UI espera.
+    """
+    try:
+        amount = Decimal(str(value))
+    except Exception:
+        return str(value)
+    text = f"{amount:,.2f}".translate(str.maketrans(",.", ".,"))
+    return f"R$ {text}" if currency == "BRL" else f"{text} {currency}"
+
+
+def _investment_performance(first, last, currency: str) -> str:
+    """Variacao da cota entre a primeira e a ultima posicao sincronizada.
+
+    Sem duas datas distintas nao ha o que comparar -- caso comum em conexoes
+    recem-sincronizadas, onde so existe a posicao de hoje.
+    """
+    if not first or not last or first.pk == last.pk or not first.unit_price:
+        return ""
+    change = (last.unit_price - first.unit_price) / first.unit_price * Decimal("100")
+    return (
+        f", variacao de {change:+.2f}% desde {first.as_of_date} "
+        f"(cota {_format_amount(first.unit_price, currency)} -> "
+        f"{_format_amount(last.unit_price, currency)})"
+    )
+
+
 def _build_summary_document(user) -> Document:
     summary = build_user_financial_summary(user)
     breakdown = summary["breakdown"]
     lines = [
         "# Resumo patrimonial",
-        f"Ativos: {summary['assets']}",
-        f"Passivos: {summary['liabilities']}",
-        f"Patrimonio liquido: {summary['net_worth']}",
+        f"Ativos: {_format_amount(summary['assets'])}",
+        f"Passivos: {_format_amount(summary['liabilities'])}",
+        f"Patrimonio liquido: {_format_amount(summary['net_worth'])}",
         "",
         "## Composicao",
-        f"Caixa: {breakdown['cash']}",
-        f"Investimentos: {breakdown['investments']}",
-        f"Previdencia: {breakdown['pension']}",
-        f"Dividas: {breakdown['debts']}",
-        f"Cartoes de credito: {breakdown['credit_cards']}",
+        f"Caixa: {_format_amount(breakdown['cash'])}",
+        f"Investimentos: {_format_amount(breakdown['investments'])}",
+        f"Previdencia: {_format_amount(breakdown['pension'])}",
+        f"Dividas: {_format_amount(breakdown['debts'])}",
+        f"Cartoes de credito: {_format_amount(breakdown['credit_cards'])}",
     ]
     return Document(
         source_type=SUMMARY_SOURCE_TYPE,
@@ -193,9 +248,23 @@ def _build_accounts_document(user) -> Document | None:
         return None
     lines = [f"# Contas ({len(accounts)})"]
     for account in accounts:
+        # Cheque especial: so aparece se o banco reporta e se ha algo a dizer --
+        # a maioria das contas nunca usa, e "limite 0,00" seria ruido.
+        overdraft_bits = []
+        if account.overdraft_used:
+            overdraft_bits.append(
+                f"cheque especial usado {_format_amount(account.overdraft_used, account.currency)}"
+            )
+        if account.overdraft_limit:
+            overdraft_bits.append(
+                "limite de cheque especial "
+                f"{_format_amount(account.overdraft_limit, account.currency)}"
+            )
+        overdraft_text = f", {', '.join(overdraft_bits)}" if overdraft_bits else ""
         lines.append(
             f"- {account.name} ({account.type}) em {account.connection.institution.name}: "
-            f"saldo {account.balance}, disponivel {account.available_balance} {account.currency}"
+            f"saldo {_format_amount(account.balance, account.currency)}, disponivel "
+            f"{_format_amount(account.available_balance, account.currency)}{overdraft_text}"
         )
     return Document(
         source_type="accounts",
@@ -211,9 +280,20 @@ def _build_cards_document(user) -> Document | None:
         return None
     lines = [f"# Cartoes de credito ({len(cards)})"]
     for card in cards:
+        # Bandeira/nivel e status so aparecem quando a Pluggy reporta -- muitas
+        # instituicoes nao devolvem `creditData` completo.
+        extra_bits = []
+        if card.brand:
+            extra_bits.append(f"{card.brand} {card.level}".strip())
+        if card.status and card.status.upper() != "ACTIVE":
+            extra_bits.append(f"status {card.status}")
+        if card.available_credit_limit is not None:
+            extra_bits.append(f"limite disponivel {_format_amount(card.available_credit_limit)}")
+        extra_text = f" ({', '.join(extra_bits)})" if extra_bits else ""
         lines.append(
-            f"- {card.name}: limite {card.credit_limit}, fatura atual {card.current_balance}, "
-            f"vence dia {card.due_day}, fecha dia {card.close_day}"
+            f"- {card.name}: limite {_format_amount(card.credit_limit)}, "
+            f"fatura atual {_format_amount(card.current_balance)}, "
+            f"vence dia {card.due_day}, fecha dia {card.close_day}{extra_text}"
         )
     return Document(
         source_type="cards",
@@ -227,20 +307,70 @@ def _build_investments_document(user) -> Document | None:
     investments = list(Investment.objects.filter(connection__user=user).order_by("name"))
     if not investments:
         return None
-    latest = {}
-    for position in InvestmentPosition.objects.filter(investment__connection__user=user).order_by(
-        "investment_id", "-as_of_date"
-    ):
-        latest.setdefault(position.investment_id, position)
+
+    # Uma passagem, ordenada por data: a primeira posicao vista por investimento
+    # e a mais antiga, a ultima e a mais recente. Da pra calcular variacao de
+    # cota sem uma segunda query.
+    earliest: dict[int, InvestmentPosition] = {}
+    latest: dict[int, InvestmentPosition] = {}
+    for position in InvestmentPosition.objects.filter(
+        investment__connection__user=user
+    ).order_by("investment_id", "as_of_date"):
+        earliest.setdefault(position.investment_id, position)
+        latest[position.investment_id] = position
 
     lines = [f"# Investimentos ({len(investments)})"]
+    totals_by_kind: dict[str, Decimal] = {}
     for investment in investments:
         position = latest.get(investment.pk)
         value = position.market_value if position else Decimal("0")
+        totals_by_kind[investment.kind] = totals_by_kind.get(investment.kind, Decimal("0")) + value
         as_of = f" em {position.as_of_date}" if position else " (sem posicao registrada)"
-        lines.append(
-            f"- {investment.name} ({investment.kind}): {value} {investment.currency}{as_of}"
+        performance = _investment_performance(
+            earliest.get(investment.pk), position, investment.currency
         )
+
+        # Rentabilidade e lucro do dia (campos crus da Pluggy, sem uso na
+        # posicao antes desta mudanca). "rentabilidade", nunca "variacao": o
+        # segundo termo e reservado para a comparacao entre posicoes acima.
+        rate_bits = []
+        if position and position.last_month_rate is not None:
+            rate_bits.append(f"rentabilidade do mes {position.last_month_rate:+.2f}%")
+        if position and position.annual_rate is not None:
+            rate_bits.append(f"rentabilidade anual {position.annual_rate:+.2f}%")
+        if position and position.amount_profit is not None:
+            rate_bits.append(
+                f"lucro acumulado {_format_amount(position.amount_profit, investment.currency)}"
+            )
+        rate_text = f", {', '.join(rate_bits)}" if rate_bits else ""
+
+        # Dados cadastrais do ativo (emissor, vencimento, isencao de IR), uteis
+        # mesmo antes de existir qualquer posicao sincronizada.
+        asset_bits = []
+        if investment.due_date:
+            asset_bits.append(f"vencimento em {investment.due_date}")
+        if investment.issuer:
+            asset_bits.append(f"emissor {investment.issuer}")
+        if investment.tax_exempt:
+            asset_bits.append("isento de IR")
+        asset_text = f", {', '.join(asset_bits)}" if asset_bits else ""
+
+        lines.append(
+            f"- {investment.name} ({investment.kind}): "
+            f"{_format_amount(value, investment.currency)}{as_of}{performance}"
+            f"{rate_text}{asset_text}"
+        )
+
+    # Concentracao por tipo de ativo: sinal direto pra LLM apontar falta de
+    # diversificacao sem ter que somar os itens de cima na cabeca.
+    total_value = sum(totals_by_kind.values())
+    if total_value > 0 and len(totals_by_kind) > 1:
+        lines.append("")
+        lines.append("## Distribuicao por tipo de ativo")
+        for kind, total in sorted(totals_by_kind.items(), key=lambda item: -item[1]):
+            share = total / total_value * Decimal("100")
+            lines.append(f"- {kind}: {_format_amount(total)} ({share:.1f}% da carteira)")
+
     return Document(
         source_type="investments",
         source_id=str(user.pk),
@@ -250,17 +380,69 @@ def _build_investments_document(user) -> Document | None:
 
 
 def _build_pension_document(user) -> Document | None:
-    plans = list(PensionPlan.objects.filter(connection__user=user).order_by("name"))
+    plans = list(PensionPlan.objects.filter(user=user).order_by("name"))
     if not plans:
         return None
     lines = [f"# Previdencia privada ({len(plans)})"]
     for plan in plans:
-        lines.append(f"- {plan.name} ({plan.provider}): saldo {plan.balance}")
+        extra_bits = []
+        if plan.annual_rate is not None:
+            extra_bits.append(f"rentabilidade anual {plan.annual_rate:+.2f}%")
+        if plan.amount_profit is not None:
+            extra_bits.append(f"lucro acumulado {_format_amount(plan.amount_profit)}")
+        extra_text = f", {', '.join(extra_bits)}" if extra_bits else ""
+        lines.append(
+            f"- {plan.name} ({plan.provider}): saldo {_format_amount(plan.balance)}{extra_text}"
+        )
     return Document(
         source_type="pension_plans",
         source_id=str(user.pk),
         content="\n".join(lines),
         metadata={"count": len(plans)},
+    )
+
+
+def _build_identity_document(user) -> Document | None:
+    """Perfil declarado ao banco (Pluggy `/identity`), quando ha algo a dizer.
+
+    Uma linha por conexao: cada instituicao pode reportar perfil de investidor
+    e renda/patrimonio informados de forma independente, e nao ha garantia de
+    que coincidam entre bancos.
+    """
+    identities = list(
+        Identity.objects.filter(connection__user=user).select_related("connection__institution")
+    )
+    lines = []
+    for identity in identities:
+        facts = []
+        if identity.investor_profile:
+            facts.append(f"perfil de investidor {identity.investor_profile.lower()}")
+        if identity.occupation_description:
+            facts.append(f"ocupacao {identity.occupation_description}")
+        if identity.informed_income_amount is not None:
+            frequency = (
+                f" ({identity.informed_income_frequency.lower()})"
+                if identity.informed_income_frequency
+                else ""
+            )
+            facts.append(
+                f"renda informada {_format_amount(identity.informed_income_amount)}{frequency}"
+            )
+        if identity.informed_patrimony_amount is not None:
+            facts.append(
+                "patrimonio informado ao banco "
+                f"{_format_amount(identity.informed_patrimony_amount)}"
+            )
+        if facts:
+            lines.append(f"- {identity.connection.institution.name}: {', '.join(facts)}")
+
+    if not lines:
+        return None
+    return Document(
+        source_type="identity",
+        source_id=str(user.pk),
+        content="\n".join(["# Perfil declarado ao banco"] + lines),
+        metadata={"count": len(lines)},
     )
 
 
@@ -275,8 +457,8 @@ def _build_goals_document(user) -> Document | None:
         )
         alvo = f", alvo em {goal.target_date}" if goal.target_date else ""
         lines.append(
-            f"- {goal.name} [{goal.status}]: {goal.current_amount} de {goal.target_amount} "
-            f"({progress:.1f}%){alvo}"
+            f"- {goal.name} [{goal.status}]: {_format_amount(goal.current_amount)} de "
+            f"{_format_amount(goal.target_amount)} ({progress:.1f}%){alvo}"
         )
     return Document(
         source_type="goals",
@@ -292,22 +474,26 @@ def _build_subscriptions_document(user) -> Document | None:
         return None
     lines = [
         "# Assinaturas e despesas recorrentes",
-        f"Total recorrente mensal: {overview['monthly_recurring_total']} "
+        f"Total recorrente mensal: {_format_amount(overview['monthly_recurring_total'])} "
         f"em {overview['active_count']} assinaturas ativas",
-        f"Pago no mes: {overview['paid_this_month']}",
-        f"Pendente no mes: {overview['pending_this_month']}",
-        f"Atrasado: {overview['overdue_total']}",
+        f"Pago no mes: {_format_amount(overview['paid_this_month'])}",
+        f"Pendente no mes: {_format_amount(overview['pending_this_month'])}",
+        f"Atrasado: {_format_amount(overview['overdue_total'])}",
     ]
     if overview["overdue"]:
         lines.append("")
         lines.append("## Atrasados")
         for item in overview["overdue"]:
-            lines.append(f"- {item['name']}: {item['amount']} venceu em {item['due_date']}")
+            lines.append(
+                f"- {item['name']}: {_format_amount(item['amount'])} venceu em {item['due_date']}"
+            )
     if overview["upcoming"]:
         lines.append("")
         lines.append("## Proximos vencimentos")
         for item in overview["upcoming"]:
-            lines.append(f"- {item['name']}: {item['amount']} vence em {item['due_date']}")
+            lines.append(
+                f"- {item['name']}: {_format_amount(item['amount'])} vence em {item['due_date']}"
+            )
     return Document(
         source_type="subscriptions",
         source_id=str(user.pk),
@@ -421,7 +607,18 @@ def _build_transaction_documents(user, months: int = TRANSACTION_MONTHS) -> list
     # ordena por valor e corta os 15 primeiros de cada mes em memoria.
     largest: dict[str, list[Transaction]] = {}
     for tx in base.order_by("-amount").only(
-        "description", "amount", "currency", "type", "category", "booked_at"
+        "description",
+        "amount",
+        "currency",
+        "type",
+        "category",
+        "booked_at",
+        "merchant_name",
+        "installment_number",
+        "installment_total",
+        "payment_method",
+        "payment_payer",
+        "payment_receiver",
     ):
         rows = largest.setdefault(_month_key(tx.booked_at.date()), [])
         if len(rows) < 15:
@@ -431,20 +628,36 @@ def _build_transaction_documents(user, months: int = TRANSACTION_MONTHS) -> list
     for month, bucket in totals.items():
         lines = [
             f"# Transacoes de {month} ({bucket['count']} lancamentos)",
-            f"Receitas: {bucket['credits']}",
-            f"Despesas: {bucket['debits']}",
+            f"Receitas: {_format_amount(bucket['credits'])}",
+            f"Despesas: {_format_amount(bucket['debits'])}",
             "",
             "## Despesas por categoria",
         ]
         for category, total in sorted(bucket["categories"].items(), key=lambda item: -item[1]):
-            lines.append(f"- {category}: {total}")
+            lines.append(f"- {category}: {_format_amount(total)}")
 
         lines.append("")
         lines.append("## Maiores lancamentos")
         for tx in largest.get(month, []):
+            # Estabelecimento, parcela e contraparte de PIX/TED: campos crus da
+            # Pluggy, sem uso nesta linha antes desta mudanca.
+            detail_bits = []
+            if tx.merchant_name:
+                detail_bits.append(f"estabelecimento {tx.merchant_name}")
+            if tx.installment_number and tx.installment_total:
+                detail_bits.append(f"parcela {tx.installment_number}/{tx.installment_total}")
+            if tx.payment_method:
+                counterparty = (tx.payment_receiver or {}).get("name") or (
+                    tx.payment_payer or {}
+                ).get("name")
+                detail_bits.append(
+                    f"{tx.payment_method} com {counterparty}" if counterparty else tx.payment_method
+                )
+            detail_text = f", {', '.join(detail_bits)}" if detail_bits else ""
             lines.append(
-                f"- {tx.booked_at:%Y-%m-%d} {tx.description}: {tx.amount} "
-                f"{tx.currency} ({tx.type}, {tx.category or 'sem categoria'})"
+                f"- {tx.booked_at:%Y-%m-%d} {tx.description}: "
+                f"{_format_amount(tx.amount, tx.currency)} "
+                f"({tx.type}, {tx.category or 'sem categoria'}){detail_text}"
             )
 
         documents.append(
@@ -470,6 +683,7 @@ def build_user_documents(user) -> list[Document]:
         _build_cards_document,
         _build_investments_document,
         _build_pension_document,
+        _build_identity_document,
         _build_goals_document,
         _build_subscriptions_document,
         _build_rules_document,
@@ -642,21 +856,30 @@ class RAGService:
     def retrieve_report_context(self, user, query: str, top_k: int = 6) -> list[dict]:
         """Contexto do relatorio de portfolio.
 
-        O resumo patrimonial entra sempre: e a ancora do relatorio e perderia a
-        disputa de similaridade contra um mes de transacoes, que tem muito mais
-        texto sobre qualquer assunto especifico.
+        Resumo patrimonial e investimentos entram sempre: sao a ancora do
+        relatorio e perderiam a disputa de similaridade contra um mes de
+        transacoes, que tem muito mais texto sobre qualquer assunto especifico.
+        Investimentos entra garantido junto porque avaliar performance da
+        carteira e sugerir aportes e o pedido mais comum deste relatorio -- sem
+        isso a resposta dependia da sorte da busca semantica.
         """
-        anchor = list(
-            Embedding.objects.filter(
-                chunk__user=user,
-                chunk__status=DocumentChunkStatus.INDEXED,
-                chunk__source_type=SUMMARY_SOURCE_TYPE,
-            ).select_related("chunk")[:1]
-        )
-        context = [{"chunk": row.chunk, "similarity": 1.0} for row in anchor]
+        anchor_types = (SUMMARY_SOURCE_TYPE, "investments")
+        context = []
+        anchored_types = set()
+        for source_type in anchor_types:
+            anchor = list(
+                Embedding.objects.filter(
+                    chunk__user=user,
+                    chunk__status=DocumentChunkStatus.INDEXED,
+                    chunk__source_type=source_type,
+                ).select_related("chunk")[:1]
+            )
+            if anchor:
+                context.append({"chunk": anchor[0].chunk, "similarity": 1.0})
+                anchored_types.add(source_type)
 
         for item in self.search(user, query, top_k=top_k):
-            if item["chunk"].source_type != SUMMARY_SOURCE_TYPE:
+            if item["chunk"].source_type not in anchored_types:
                 context.append(item)
         return context
 
@@ -676,17 +899,29 @@ class LLMService:
         )
 
         prompt = (
-            "Você é um assistente financeiro especializado. "
-            "Com base nos dados reais do usuário abaixo, gere um relatório estruturado em JSON. "
-            "Use apenas os dados fornecidos; não invente valores nem instituições.\n\n"
+            "Você é um assistente financeiro especializado em investimentos no Brasil. "
+            "Com base nos dados reais do usuário abaixo, gere um relatório estruturado em JSON.\n\n"
+            "Regras obrigatórias:\n"
+            "- Use apenas os dados fornecidos; não invente valores, instituições, fundos ou tickers.\n"
+            "- Formate valores monetários no padrão brasileiro: separador de milhar '.', separador "
+            "decimal ',' e prefixo 'R$ ' (ex.: R$ 1.234,56). Nunca use o padrão americano (1,234.56).\n"
+            "- Cada item das listas deve ser uma frase única em texto simples (string), nunca um "
+            "objeto ou par chave/valor.\n\n"
             f"Contexto:\n{context_text}\n\n"
             "Retorne um JSON com as chaves:\n"
-            "- summary: resumo executivo da saúde financeira\n"
-            "- strengths: lista de pontos fortes\n"
-            "- weaknesses: lista de pontos fracos\n"
-            "- adjustments: lista de ajustes sugeridos nas aplicações existentes\n"
-            "- suggestions: lista de novas aplicações/investimentos sugeridas\n"
-            "- projections: texto curto com projeções baseadas no comportamento histórico\n"
+            "- summary: texto corrido (string) com o resumo executivo da saúde financeira\n"
+            "- strengths: lista de frases com pontos fortes\n"
+            "- weaknesses: lista de frases com pontos de atenção\n"
+            "- adjustments: lista de frases avaliando a performance dos fundos e aplicações atuais "
+            "(use a variação de cota e a distribuição por tipo de ativo do contexto de investimentos; "
+            "compare com referências conhecidas como CDI, IPCA ou Ibovespa quando fizer sentido) e "
+            "apontando concentração de risco por tipo de ativo\n"
+            "- suggestions: lista de frases sugerindo classes de fundos ou FIIs (ex.: FII de papel, "
+            "FII de tijolo, fundo multimercado, renda fixa, Tesouro Direto) que ajudariam a "
+            "diversificar a carteira atual, cada uma com uma justificativa curta ligada à lacuna "
+            "identificada; não cite nomes de fundos ou tickers específicos, pois você não tem acesso "
+            "a dados de mercado atualizados\n"
+            "- projections: texto curto (string) com projeções baseadas no comportamento histórico\n"
         )
 
         payload = _ollama_post(

@@ -24,6 +24,7 @@ from apps.finance.views import (
     PluggyRegenerateAuthAPIView,
     PluggyWebhookAPIView,
     PortfolioReportAPIView,
+    PortfolioReportViewSet,
     RegisterAPIView,
     SubscriptionPaymentViewSet,
     SubscriptionViewSet,
@@ -49,6 +50,7 @@ router.register(
     r"subscription-payments", SubscriptionPaymentViewSet, basename="subscription-payment"
 )
 router.register(r"categorization-rules", CategorizationRuleViewSet, basename="categorization-rule")
+router.register(r"ai/portfolio-reports", PortfolioReportViewSet, basename="portfolio-report-history")
 
 urlpatterns = [
     path("admin/", admin.site.urls),

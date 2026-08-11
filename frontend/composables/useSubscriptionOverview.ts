@@ -29,37 +29,13 @@ const OVERVIEW_QUERY = `{
 }`
 
 export function useSubscriptionOverview() {
-  const config = useRuntimeConfig()
-  const router = useRouter()
-  const { logout } = useAuth()
+  const { graphql } = useApi()
 
   const { data: overview, refresh } = useAsyncData<SubscriptionOverview | null>(
     'subscription-overview',
     async () => {
-      try {
-        const res = await $fetch<{ data?: { subscriptionOverview?: SubscriptionOverview | null } }>(
-          `${config.public.graphqlEndpoint}`,
-          {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${useCookie<string | null>('access_token').value}`,
-              'Content-Type': 'application/json',
-            },
-            body: { query: OVERVIEW_QUERY },
-          }
-        )
-        return res?.data?.subscriptionOverview ?? null
-      } catch (error) {
-        if ((error as { status?: number }).status === 401) {
-          const path = router.currentRoute.value.path
-          const isAuthPage = path === '/login' || path === '/register'
-          if (!isAuthPage) {
-            logout()
-            await router.push('/login')
-          }
-        }
-        return null
-      }
+      const res = await graphql<{ data?: { subscriptionOverview?: SubscriptionOverview | null } }>(OVERVIEW_QUERY)
+      return res?.data?.subscriptionOverview ?? null
     },
     { default: () => null },
   )

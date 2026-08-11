@@ -1,9 +1,12 @@
 import calendar
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 from datetime import date as date_type
 from decimal import Decimal
 
+from django.conf import settings
 from django.db.models import Q, Sum
+from django.db.models.functions import Lower
+from django.utils import timezone
 
 from .domain import classify_account_balance
 from .models import (
@@ -23,7 +26,7 @@ from .models import (
 def build_user_financial_summary(user) -> dict:
     accounts = Account.objects.filter(connection__user=user).select_related("connection")
     cards = Card.objects.filter(connection__user=user)
-    pensions = PensionPlan.objects.filter(connection__user=user)
+    pensions = PensionPlan.objects.filter(user=user)
     investment_positions = InvestmentPosition.objects.filter(investment__connection__user=user)
 
     cash = Decimal("0")
@@ -65,10 +68,25 @@ def build_user_financial_summary(user) -> dict:
 
 def build_monthly_cash_flow_for_range(user, start_date, end_date) -> dict:
     """Build cash flow for an arbitrary date range (exclusive end)."""
-    transactions = Transaction.objects.filter(
-        Q(account__connection__user=user) | Q(card__connection__user=user),
-        booked_at__gte=start_date,
-        booked_at__lt=end_date,
+    # `booked_at` e DateTimeField; filtrar com um `date` cru promove para meia-
+    # noite **naive** e o Django avisa (e assume UTC) a cada chamada -- aware de
+    # proposito, no fuso ativo, para o limite do dia bater com o que a tela mostra.
+    start_at = timezone.make_aware(datetime.combine(start_date, time.min))
+    end_at = timezone.make_aware(datetime.combine(end_date, time.min))
+
+    # Pagamento de fatura de cartao chega da Pluggy como duas transacoes: debito
+    # na conta (saida real) e credito no cartao (so abate a divida). Sem excluir
+    # pela categoria, o lado do cartao virava receita fantasma e o lado da conta
+    # duplicava uma despesa que ja foi contada quando a compra ocorreu no cartao.
+    # O mesmo vale para transferencia entre contas do proprio usuario.
+    transactions = (
+        Transaction.objects.filter(
+            Q(account__connection__user=user) | Q(card__connection__user=user),
+            booked_at__gte=start_at,
+            booked_at__lt=end_at,
+        )
+        .annotate(provider_category_lower=Lower("provider_category"))
+        .exclude(provider_category_lower__in=settings.FINANCE_INTERNAL_TRANSFER_CATEGORIES)
     )
 
     income = transactions.filter(type=TransactionType.CREDIT).aggregate(total=Sum("amount")).get(

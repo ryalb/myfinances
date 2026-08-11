@@ -16,6 +16,9 @@ const notice = ref('')
 const busyRule = ref<number | null>(null)
 const reapplying = ref(false)
 
+const editingId = ref<number | null>(null)
+const editForm = reactive({ pattern: '', category: '', priority: '100' })
+
 const run = async (action: () => Promise<void>, fallback: string) => {
   error.value = ''
   notice.value = ''
@@ -24,6 +27,18 @@ const run = async (action: () => Promise<void>, fallback: string) => {
   } catch (e: unknown) {
     error.value = extractApiError(e, fallback)
   }
+}
+
+// O motor de regras roda na importação: criar ou editar uma regra sozinha não
+// muda nada do que já está gravado. Reaplicar na hora, em vez de deixar isso para
+// um segundo clique em "Reaplicar ao histórico", é o que faz o efeito aparecer.
+const reapplyAndNotify = async (prefix = '') => {
+  const updated = await reapply()
+  const suffix
+    = updated === 0
+      ? 'Nenhum lançamento mudou de categoria.'
+      : `${updated} ${updated === 1 ? 'lançamento recategorizado' : 'lançamentos recategorizados'}.`
+  notice.value = prefix ? `${prefix} ${suffix}` : suffix
 }
 
 const submit = async () => {
@@ -47,20 +62,17 @@ const submit = async () => {
     form.pattern = ''
     form.category = ''
     form.priority = '100'
-    // O motor de regras roda na importação. Sem este aviso, criar uma regra parece
-    // não ter efeito nenhum — foi exatamente a dúvida que apareceu no uso real.
-    notice.value
-      = 'Regra criada. Ela vale para as próximas importações — use "Reaplicar ao histórico" para valer também no que já está gravado.'
+    await reapplyAndNotify('Regra criada.')
   }, 'Erro ao criar a regra.')
   saving.value = false
 }
 
 const toggleActive = async (rule: CategorizationRule) => {
   busyRule.value = rule.id
-  await run(
-    () => updateRule(rule.id, { is_active: !rule.is_active }),
-    'Erro ao atualizar a regra.',
-  )
+  await run(async () => {
+    await updateRule(rule.id, { is_active: !rule.is_active })
+    await reapplyAndNotify()
+  }, 'Erro ao atualizar a regra.')
   busyRule.value = null
 }
 
@@ -71,15 +83,44 @@ const remove = async (rule: CategorizationRule) => {
   busyRule.value = null
 }
 
+const startEdit = (rule: CategorizationRule) => {
+  editingId.value = rule.id
+  editForm.pattern = rule.pattern
+  editForm.category = rule.category
+  editForm.priority = String(rule.priority)
+}
+
+const cancelEdit = () => {
+  editingId.value = null
+}
+
+const saveEdit = async (rule: CategorizationRule) => {
+  const priority = Number.parseInt(editForm.priority, 10)
+  if (!editForm.pattern.trim() || !editForm.category.trim()) {
+    error.value = 'Informe o texto a procurar e a categoria de destino.'
+    return
+  }
+  if (!Number.isInteger(priority) || priority < 0) {
+    error.value = 'A prioridade precisa ser um número inteiro não negativo.'
+    return
+  }
+
+  busyRule.value = rule.id
+  await run(async () => {
+    await updateRule(rule.id, {
+      pattern: editForm.pattern.trim(),
+      category: editForm.category.trim(),
+      priority,
+    })
+    editingId.value = null
+    await reapplyAndNotify('Regra atualizada.')
+  }, 'Erro ao editar a regra.')
+  busyRule.value = null
+}
+
 const runReapply = async () => {
   reapplying.value = true
-  await run(async () => {
-    const updated = await reapply()
-    notice.value
-      = updated === 0
-        ? 'Nenhum lançamento mudou de categoria.'
-        : `${updated} ${updated === 1 ? 'lançamento recategorizado' : 'lançamentos recategorizados'}.`
-  }, 'Erro ao reaplicar as regras.')
+  await run(() => reapplyAndNotify(), 'Erro ao reaplicar as regras.')
   reapplying.value = false
 }
 </script>
@@ -181,47 +222,117 @@ const runReapply = async () => {
             :key="rule.id"
             :class="['border-b border-sepia-100 last:border-0', rule.is_active ? '' : 'opacity-50']"
           >
-            <td class="px-4 py-3 text-sepia-500">{{ rule.priority }}</td>
-            <td class="px-4 py-3 font-medium text-sepia-900">{{ rule.pattern }}</td>
-            <td class="px-4 py-3">
-              <span class="inline-block whitespace-nowrap rounded bg-sepia-100 px-2 py-0.5 text-xs text-sepia-600">
-                {{ rule.category }}
-              </span>
-            </td>
-            <td class="px-4 py-3">
-              <span
-                :class="[
-                  'inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium',
-                  rule.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-sepia-100 text-sepia-600',
-                ]"
-              >
-                {{ rule.is_active ? 'Ativa' : 'Inativa' }}
-              </span>
-            </td>
-            <td class="px-4 py-3 text-right">
-              <div class="flex items-center justify-end gap-1">
-                <Button
-                  text
-                  rounded
-                  :disabled="busyRule === rule.id"
-                  :title="rule.is_active ? 'Desativar' : 'Reativar'"
-                  class="!text-sepia-400 hover:!text-sepia-700"
-                  @click="toggleActive(rule)"
+            <template v-if="editingId === rule.id">
+              <td class="px-4 py-2">
+                <input
+                  v-model="editForm.priority"
+                  type="number"
+                  min="0"
+                  class="w-20 rounded-lg border border-sepia-300 px-2 py-1.5 text-sm focus:border-sepia-500 focus:outline-none focus:ring-1 focus:ring-sepia-500"
                 >
-                  <Icon :icon="rule.is_active ? 'mdi:pause-circle-outline' : 'mdi:play-circle-outline'" class="h-5 w-5" />
-                </Button>
-                <Button
-                  text
-                  rounded
-                  :disabled="busyRule === rule.id"
-                  title="Excluir"
-                  class="!text-sepia-400 hover:!text-rose-600"
-                  @click="remove(rule)"
+              </td>
+              <td class="px-4 py-2">
+                <input
+                  v-model="editForm.pattern"
+                  type="text"
+                  class="w-full rounded-lg border border-sepia-300 px-2 py-1.5 text-sm focus:border-sepia-500 focus:outline-none focus:ring-1 focus:ring-sepia-500"
                 >
-                  <Icon icon="mdi:trash-can-outline" class="h-5 w-5" />
-                </Button>
-              </div>
-            </td>
+              </td>
+              <td class="px-4 py-2">
+                <input
+                  v-model="editForm.category"
+                  type="text"
+                  class="w-full rounded-lg border border-sepia-300 px-2 py-1.5 text-sm focus:border-sepia-500 focus:outline-none focus:ring-1 focus:ring-sepia-500"
+                >
+              </td>
+              <td class="px-4 py-3">
+                <span
+                  :class="[
+                    'inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium',
+                    rule.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-sepia-100 text-sepia-600',
+                  ]"
+                >
+                  {{ rule.is_active ? 'Ativa' : 'Inativa' }}
+                </span>
+              </td>
+              <td class="px-4 py-3 text-right">
+                <div class="flex items-center justify-end gap-1">
+                  <Button
+                    text
+                    rounded
+                    :disabled="busyRule === rule.id"
+                    title="Salvar"
+                    class="!text-emerald-600 hover:!text-emerald-700"
+                    @click="saveEdit(rule)"
+                  >
+                    <Icon icon="mdi:check" class="h-5 w-5" />
+                  </Button>
+                  <Button
+                    text
+                    rounded
+                    :disabled="busyRule === rule.id"
+                    title="Cancelar"
+                    class="!text-sepia-400 hover:!text-sepia-700"
+                    @click="cancelEdit"
+                  >
+                    <Icon icon="mdi:close" class="h-5 w-5" />
+                  </Button>
+                </div>
+              </td>
+            </template>
+            <template v-else>
+              <td class="px-4 py-3 text-sepia-500">{{ rule.priority }}</td>
+              <td class="px-4 py-3 font-medium text-sepia-900">{{ rule.pattern }}</td>
+              <td class="px-4 py-3">
+                <span class="inline-block whitespace-nowrap rounded bg-sepia-100 px-2 py-0.5 text-xs text-sepia-600">
+                  {{ rule.category }}
+                </span>
+              </td>
+              <td class="px-4 py-3">
+                <span
+                  :class="[
+                    'inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium',
+                    rule.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-sepia-100 text-sepia-600',
+                  ]"
+                >
+                  {{ rule.is_active ? 'Ativa' : 'Inativa' }}
+                </span>
+              </td>
+              <td class="px-4 py-3 text-right">
+                <div class="flex items-center justify-end gap-1">
+                  <Button
+                    text
+                    rounded
+                    :disabled="busyRule === rule.id"
+                    title="Editar"
+                    class="!text-sepia-400 hover:!text-sepia-700"
+                    @click="startEdit(rule)"
+                  >
+                    <Icon icon="mdi:pencil-outline" class="h-5 w-5" />
+                  </Button>
+                  <Button
+                    text
+                    rounded
+                    :disabled="busyRule === rule.id"
+                    :title="rule.is_active ? 'Desativar' : 'Reativar'"
+                    class="!text-sepia-400 hover:!text-sepia-700"
+                    @click="toggleActive(rule)"
+                  >
+                    <Icon :icon="rule.is_active ? 'mdi:pause-circle-outline' : 'mdi:play-circle-outline'" class="h-5 w-5" />
+                  </Button>
+                  <Button
+                    text
+                    rounded
+                    :disabled="busyRule === rule.id"
+                    title="Excluir"
+                    class="!text-sepia-400 hover:!text-rose-600"
+                    @click="remove(rule)"
+                  >
+                    <Icon icon="mdi:trash-can-outline" class="h-5 w-5" />
+                  </Button>
+                </div>
+              </td>
+            </template>
           </tr>
         </tbody>
       </table>

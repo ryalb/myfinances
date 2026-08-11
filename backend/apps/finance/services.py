@@ -291,6 +291,22 @@ class PluggyClient:
         data = response.json()
         return data.get("results", [])
 
+    def fetch_item_identity(self, item_id: str) -> dict | None:
+        """Titular do item. `GET /identity` responde 404 quando o produto nao foi coletado."""
+        url = f"{self.base_url}/identity"
+        params = {"itemId": item_id}
+
+        logger.info("Pluggy fetch_item_identity item_id=%s", item_id)
+        response = self._request_with_retry("GET", url, params=params)
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        data = response.json()
+        if isinstance(data, dict) and "results" in data:
+            results = data.get("results") or []
+            return results[0] if results else None
+        return data or None
+
     def fetch_item_investments(self, item_id: str) -> list[dict]:
         url = f"{self.base_url}/investments"
         params = {"itemId": item_id}

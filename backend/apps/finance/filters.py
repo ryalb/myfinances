@@ -5,9 +5,12 @@ lugares aplicando os mesmos filtros divergem com o tempo, e o sintoma seria um C
 que nao corresponde ao que esta na tela -- silencioso e chato de descobrir.
 """
 
+from datetime import datetime, time
 from decimal import Decimal, InvalidOperation
 
 from django.db.models import Q
+from django.utils import timezone
+from django.utils.dateparse import parse_date
 
 from .models import Transaction
 
@@ -28,6 +31,20 @@ def _as_decimal(raw):
         return Decimal(raw)
     except (InvalidOperation, TypeError, ValueError):
         return None
+
+
+def _aware_midnight(raw_date: str):
+    """Meia-noite do dia informado, no fuso ativo.
+
+    `booked_at` e DateTimeField; passar a string "YYYY-MM-DD" ou um `date` cru
+    pro filtro faz o Django promover para meia-noite **naive** e emitir
+    RuntimeWarning (e assumir UTC) a cada request. Retorna None para string
+    invalida, para o chamador ignorar o filtro em vez de estourar.
+    """
+    parsed = parse_date(raw_date)
+    if parsed is None:
+        return None
+    return timezone.make_aware(datetime.combine(parsed, time.min))
 
 
 def filter_transactions(queryset, params):
@@ -60,11 +77,15 @@ def filter_transactions(queryset, params):
 
     start_date = (params.get("start_date") or "").strip()
     if start_date:
-        queryset = queryset.filter(booked_at__gte=start_date)
+        start_at = _aware_midnight(start_date)
+        if start_at is not None:
+            queryset = queryset.filter(booked_at__gte=start_at)
 
     end_date = (params.get("end_date") or "").strip()
     if end_date:
-        queryset = queryset.filter(booked_at__lt=end_date)
+        end_at = _aware_midnight(end_date)
+        if end_at is not None:
+            queryset = queryset.filter(booked_at__lt=end_at)
 
     min_amount = _as_decimal(params.get("min_amount"))
     if min_amount is not None:

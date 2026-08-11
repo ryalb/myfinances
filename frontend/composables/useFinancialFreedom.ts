@@ -31,37 +31,13 @@ const PROJECTION_QUERY = `{
 }`
 
 export function useFinancialFreedom() {
-  const config = useRuntimeConfig()
-  const router = useRouter()
-  const { logout } = useAuth()
+  const { graphql } = useApi()
 
   const { data: projection, refresh } = useAsyncData<FinancialFreedomProjection | null>(
     'financial-freedom-projection',
     async () => {
-      try {
-        const res = await $fetch<{ data?: { financialFreedomProjection?: FinancialFreedomProjection | null } }>(
-          `${config.public.graphqlEndpoint}`,
-          {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${useCookie<string | null>('access_token').value}`,
-              'Content-Type': 'application/json',
-            },
-            body: { query: PROJECTION_QUERY },
-          }
-        )
-        return res?.data?.financialFreedomProjection ?? null
-      } catch (error) {
-        if ((error as { status?: number }).status === 401) {
-          const path = router.currentRoute.value.path
-          const isAuthPage = path === '/login' || path === '/register'
-          if (!isAuthPage) {
-            logout()
-            await router.push('/login')
-          }
-        }
-        return null
-      }
+      const res = await graphql<{ data?: { financialFreedomProjection?: FinancialFreedomProjection | null } }>(PROJECTION_QUERY)
+      return res?.data?.financialFreedomProjection ?? null
     },
     { default: () => null },
   )

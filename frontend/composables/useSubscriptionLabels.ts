@@ -2,6 +2,8 @@
 // Duplicar os mapas nos dois lugares faria as listas divergirem quando uma
 // categoria nova entrasse em SubscriptionCategory.
 
+import { formatIsoDate } from '@/composables/useDateFormat'
+
 export const SUBSCRIPTION_CATEGORY_LABELS: Record<string, string> = {
   utilities: 'Utilidades',
   internet: 'Internet',
@@ -27,13 +29,7 @@ export function useSubscriptionLabels() {
   const statusBadge = (status: string) =>
     SUBSCRIPTION_STATUS_LABELS[status] || { label: status, color: 'bg-sepia-100 text-sepia-600' }
 
-  // `new Date('2026-08-10')` e parseado como UTC meia-noite; em America/Sao_Paulo
-  // (UTC-3) isso renderiza 09/08. Numa tela de vencimentos o off-by-one-dia e
-  // erro de conteudo, entao a data vem quebrada em partes.
-  const formatDueDate = (isoDate: string) => {
-    const [year, month, day] = isoDate.slice(0, 10).split('-')
-    return `${day}/${month}/${year}`
-  }
+  const formatDueDate = (isoDate: string) => formatIsoDate(isoDate)
 
   return { categoryLabel, statusBadge, formatDueDate }
 }

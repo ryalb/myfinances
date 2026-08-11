@@ -2,6 +2,7 @@
 import { useUiStore } from '@/stores/ui'
 import { formatBRL } from '@/composables/useCurrency'
 import { extractApiError } from '@/composables/useApi'
+import { formatIsoDateOnly } from '@/composables/useDateFormat'
 
 definePageMeta({
   middleware: 'auth',
@@ -13,8 +14,13 @@ type TransactionRow = {
   amount: number
   type: string
   category: string
+  is_internal_transfer: boolean
   booked_at: string
+  account_name: string
+  institution_name: string
 }
+
+const FILTERS_STORAGE_KEY = 'transactions-filters'
 
 const filters = reactive({
   search: '',
@@ -26,9 +32,29 @@ const filters = reactive({
   max_amount: '',
 })
 
+if (typeof window !== 'undefined') {
+  const saved = localStorage.getItem(FILTERS_STORAGE_KEY)
+  if (saved) {
+    try {
+      const parsed = JSON.parse(saved) as Partial<typeof filters>
+      for (const key of Object.keys(filters) as Array<keyof typeof filters>) {
+        if (parsed[key] !== undefined) filters[key] = parsed[key] as string
+      }
+    } catch {
+      // Formato antigo ou corrompido: ignora e segue com os padrões.
+    }
+  }
+}
+
+watch(filters, (value) => {
+  if (typeof window !== 'undefined') {
+    localStorage.setItem(FILTERS_STORAGE_KEY, JSON.stringify(value))
+  }
+})
+
 // A busca é debounced: cada tecla dispararia uma requisição, e o backend faz
 // `icontains` sobre o histórico inteiro.
-const debouncedSearch = ref('')
+const debouncedSearch = ref(filters.search)
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 watch(
   () => filters.search,
@@ -122,10 +148,28 @@ const exportCsv = async () => {
   }
 }
 
-const typeBadge = (type: string) =>
-  type === 'credit' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'
+const typeBadge = (tx: TransactionRow) => {
+  if (tx.is_internal_transfer) return 'bg-sepia-100 text-sepia-500'
+  return tx.type === 'credit' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'
+}
 
-const typeLabel = (type: string) => (type === 'credit' ? 'Receita' : 'Despesa')
+// Pagamento de fatura de cartao e transferencia entre contas proprias nao sao
+// receita nem despesa, so dinheiro mudando de bolso -- rotulo neutro em vez do
+// "Receita" que o `type` cru (CREDIT no lado do cartao) sugeriria.
+const typeLabel = (tx: TransactionRow) => {
+  if (tx.is_internal_transfer) return 'Transferência'
+  return tx.type === 'credit' ? 'Receita' : 'Despesa'
+}
+
+// Parcelas futuras de compras no cartão (ex: "Amazon 4/4") já entram lançadas com
+// booked_at à frente — sem isso elas se misturam ao extrato como se já tivessem ocorrido.
+const isFutureTx = (bookedAt: string) => {
+  const txDate = new Date(bookedAt)
+  txDate.setHours(0, 0, 0, 0)
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  return txDate > today
+}
 
 const inputClass
   = 'w-full rounded-lg border border-sepia-300 bg-white px-3 py-2 text-sm focus:border-sepia-500 focus:outline-none focus:ring-1 focus:ring-sepia-500'
@@ -233,15 +277,27 @@ const inputClass
           <tr>
             <th class="px-4 py-3 text-left font-medium text-sepia-600">Data</th>
             <th class="px-4 py-3 text-left font-medium text-sepia-600">Descrição</th>
+            <th class="px-4 py-3 text-left font-medium text-sepia-600">Conta</th>
+            <th class="px-4 py-3 text-left font-medium text-sepia-600">Banco</th>
             <th class="px-4 py-3 text-left font-medium text-sepia-600">Categoria</th>
             <th class="px-4 py-3 text-left font-medium text-sepia-600">Tipo</th>
             <th class="px-4 py-3 text-right font-medium text-sepia-600">Valor</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="tx in transactions" :key="tx.id" class="border-b border-sepia-100 last:border-0">
-            <td class="whitespace-nowrap px-4 py-3 text-sepia-500">{{ new Date(tx.booked_at).toLocaleDateString('pt-BR') }}</td>
+          <tr
+            v-for="tx in transactions" :key="tx.id"
+            :class="['border-b border-sepia-100 last:border-0', (isFutureTx(tx.booked_at) || tx.is_internal_transfer) ? 'opacity-60' : '']"
+          >
+            <td class="whitespace-nowrap px-4 py-3 text-sepia-500">
+              {{ formatIsoDateOnly(tx.booked_at) }}
+              <span v-if="isFutureTx(tx.booked_at)" class="ml-1.5 inline-block whitespace-nowrap rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
+                Previsto
+              </span>
+            </td>
             <td class="px-4 py-3 font-medium text-sepia-900">{{ tx.description }}</td>
+            <td class="px-4 py-3 text-sepia-600">{{ tx.account_name || '—' }}</td>
+            <td class="px-4 py-3 text-sepia-600">{{ tx.institution_name || '—' }}</td>
             <td class="px-4 py-3">
               <span v-if="tx.category" class="inline-block whitespace-nowrap rounded bg-sepia-100 px-2 py-0.5 text-xs text-sepia-600">
                 {{ tx.category }}
@@ -249,12 +305,12 @@ const inputClass
               <span v-else class="text-sepia-400">—</span>
             </td>
             <td class="px-4 py-3">
-              <span :class="['inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium', typeBadge(tx.type)]">
-                {{ typeLabel(tx.type) }}
+              <span :class="['inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium', typeBadge(tx)]">
+                {{ typeLabel(tx) }}
               </span>
             </td>
-            <td :class="['whitespace-nowrap px-4 py-3 text-right font-medium', tx.type === 'credit' ? 'text-emerald-600' : 'text-rose-600', blur]">
-              {{ tx.type === 'credit' ? '+' : '-' }}{{ formatBRL(Math.abs(Number(tx.amount))) }}
+            <td :class="['whitespace-nowrap px-4 py-3 text-right font-medium', tx.is_internal_transfer ? 'text-sepia-500' : (tx.type === 'credit' ? 'text-emerald-600' : 'text-rose-600'), blur]">
+              {{ tx.is_internal_transfer ? '' : (tx.type === 'credit' ? '+' : '-') }}{{ formatBRL(Math.abs(Number(tx.amount))) }}
             </td>
           </tr>
         </tbody>

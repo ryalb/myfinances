@@ -3,7 +3,8 @@ import Button from 'primevue/button'
 import { useUiStore } from '@/stores/ui'
 import { formatBRL } from '@/composables/useCurrency'
 import { extractApiError } from '@/composables/useApi'
-import type { Subscription } from '@/composables/useSubscriptions'
+import type { Subscription, SubscriptionPayment } from '@/composables/useSubscriptions'
+import { todayLocalISO } from '@/composables/useSubscriptions'
 
 definePageMeta({
   middleware: 'auth',
@@ -30,6 +31,22 @@ const busyPayment = ref<number | null>(null)
 const busySubscription = ref<number | null>(null)
 
 const blur = computed(() => (uiStore.isFinancialValueBlurred ? 'blur-sm select-none' : ''))
+
+// A API devolve `payments` do vencimento mais futuro para o mais antigo
+// (`Meta.ordering = ["-due_date"]`). `.slice(0, 6)` direto nessa lista mostrava só
+// os vencimentos mais distantes no futuro -- sempre "pendente", nunca o que já foi
+// pago. Aqui pega uma janela contígua em ordem cronológica ascendente ancorada em
+// hoje (o mais passado possível dentro de 6 itens, com os próximos vencimentos
+// completando quando a assinatura for nova e não tiver histórico ainda) e exibe em
+// ordem decrescente -- uma única direção, sem alternar passado/futuro no meio.
+const recentPayments = (sub: Subscription): SubscriptionPayment[] => {
+  const today = todayLocalISO()
+  const chronological = [...sub.payments].sort((a, b) => a.due_date.localeCompare(b.due_date))
+  const firstUpcomingIndex = chronological.findIndex(p => p.due_date > today)
+  const pastCount = firstUpcomingIndex === -1 ? chronological.length : firstUpcomingIndex
+  const start = Math.max(0, pastCount - 6)
+  return chronological.slice(start, start + 6).reverse()
+}
 
 const openCreate = () => {
   editing.value = null
@@ -81,7 +98,7 @@ const remove = async (sub: Subscription) => {
     <div class="flex items-center justify-between">
       <div>
         <h1 class="text-2xl font-semibold">Assinaturas e pagamentos recorrentes</h1>
-        <p class="mt-1 text-sepia-600">Cadastre despesas fixas e marque os pagamentos que não vêm de instituição conectada.</p>
+        <p class="mt-1 text-sepia-600">Cadastre despesas fixas. Pagamentos de contas conectadas são cruzados com suas transações automaticamente; marque manualmente os que não vêm de instituição conectada.</p>
       </div>
       <Button
         class="inline-flex items-center gap-2 !rounded-lg !bg-sepia-600 !px-4 !py-2 !text-sm !font-medium !text-white hover:!bg-sepia-700"
@@ -173,12 +190,16 @@ const remove = async (sub: Subscription) => {
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="payment in sub.payments.slice(0, 6)" :key="payment.id" class="border-b border-sepia-100 last:border-0">
+                <tr v-for="payment in recentPayments(sub)" :key="payment.id" class="border-b border-sepia-100 last:border-0">
                   <td class="px-3 py-2 text-sepia-500">{{ formatDueDate(payment.due_date) }}</td>
                   <td class="px-3 py-2">
                     <span :class="['rounded-full px-2 py-0.5 text-xs font-medium', statusBadge(payment.status).color]">
                       {{ statusBadge(payment.status).label }}
                     </span>
+                    <p v-if="payment.matched_transaction" class="mt-1 text-xs text-sepia-400">
+                      via {{ payment.matched_transaction.description }}
+                      <template v-if="payment.matched_transaction.account_name">· {{ payment.matched_transaction.account_name }}</template>
+                    </p>
                   </td>
                   <td :class="['px-3 py-2 text-right font-medium text-sepia-900', blur]">
                     {{ payment.paid_amount ? formatBRL(payment.paid_amount) : '—' }}

@@ -71,6 +71,39 @@ def test_nested_objects_in_a_list_are_flattened_to_text():
     assert "Reduzir cartao" in report["adjustments"][0]
 
 
+def test_dict_item_in_a_list_drops_redundant_raw_numbers():
+    """Bug real: modelo devolveu `{"ponto": "...", "valor": 180149.3, "moeda": "BRL"}`
+    e o item flattened virava "frase — 180149.3 — BRL", repetindo em numero cru o
+    que a frase ja dizia."""
+    report = normalize_report(
+        {
+            "strengths": [
+                {"ponto": "Reserva de emergencia solida", "valor": 180149.3, "moeda": "BRL"}
+            ]
+        }
+    )
+
+    assert report["strengths"] == ["Reserva de emergencia solida"]
+
+
+def test_dict_in_a_text_field_drops_redundant_raw_numbers():
+    """Mesmo bug, mas no campo de texto: a "Resumo" da UI mostrava so os numeros
+    crus concatenados porque o modelo devolveu um dict em vez de string."""
+    report = normalize_report(
+        {"summary": {"texto": "Patrimonio saudavel e diversificado", "valor": 328137.21}}
+    )
+
+    assert report["summary"] == "Patrimonio saudavel e diversificado"
+
+
+def test_dict_with_only_numbers_falls_back_to_joining_them():
+    """Sem nenhum texto descritivo sobrando, ainda assim tem que devolver algo em
+    vez de string vazia."""
+    report = normalize_report({"summary": {"ativos": 100, "passivos": 50}})
+
+    assert report["summary"] == "100 — 50"
+
+
 def test_none_report_does_not_explode():
     report = normalize_report(None)
 

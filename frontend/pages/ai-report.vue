@@ -1,13 +1,40 @@
 <script setup lang="ts">
 import Button from 'primevue/button'
 import { sourceLabel } from '@/composables/useAiReport'
+import type { PortfolioReport } from '@/composables/useAiReport'
+import { formatIsoDateTime } from '@/composables/useDateFormat'
 
 definePageMeta({
   middleware: 'auth',
 })
 
-const { report, loading, error, generate } = useAiReport()
+const { report, loading, error, generate, view } = useAiReport()
 const query = ref('')
+
+// Histórico dos relatórios já gerados, persistidos no backend para consulta
+// posterior -- sem isso um refresh de página perdia a análise.
+const {
+  items: history,
+  count: historyCount,
+  refresh: refreshHistory,
+} = usePaginatedList<PortfolioReport>('ai-reports', '/ai/portfolio-reports/', { pageSize: 10 })
+
+const onGenerate = async () => {
+  await generate(query.value)
+  await refreshHistory()
+}
+
+// Ao entrar na tela, mostra o relatório mais recente em vez de ficar em branco:
+// a análise já existe, só não foi gerada nesta sessão.
+watch(
+  history,
+  (items) => {
+    if (!report.value && items.length) view(items[0])
+  },
+  { immediate: true },
+)
+
+const formatDate = formatIsoDateTime
 
 const listSections = computed(() => {
   if (!report.value) return []
@@ -74,18 +101,41 @@ const isEmpty = computed(
           type="text"
           placeholder="Ex: onde estou gastando demais? dá para aumentar o aporte?"
           class="w-full rounded-lg border border-sepia-300 px-3 py-2 text-sm focus:border-sepia-500 focus:outline-none focus:ring-1 focus:ring-sepia-500"
-          @keyup.enter="generate(query)"
+          @keyup.enter="onGenerate"
         >
         <Button
           :disabled="loading"
           class="!rounded-lg !bg-sepia-600 !px-4 !py-2 !text-sm !font-medium !text-white hover:!bg-sepia-700 disabled:!opacity-50 whitespace-nowrap"
-          @click="generate(query)"
+          @click="onGenerate"
         >
           {{ loading ? 'Analisando...' : 'Gerar relatório' }}
         </Button>
       </div>
       <p class="mt-2 text-xs text-sepia-400">
         A primeira geração indexa seus dados e pode levar mais tempo.
+      </p>
+    </div>
+
+    <div v-if="history.length" class="rounded-xl border border-sepia-200 bg-white p-5 shadow-sm">
+      <h3 class="mb-3 text-sm font-semibold text-sepia-900">Relatórios anteriores</h3>
+      <ul class="flex flex-wrap gap-2">
+        <li v-for="item in history" :key="item.id">
+          <button
+            type="button"
+            :class="[
+              'rounded-full border px-3 py-1 text-xs transition',
+              report?.id === item.id
+                ? 'border-sepia-600 bg-sepia-600 text-white'
+                : 'border-sepia-200 bg-sepia-50 text-sepia-700 hover:border-sepia-400',
+            ]"
+            @click="view(item)"
+          >
+            {{ formatDate(item.created_at) }}
+          </button>
+        </li>
+      </ul>
+      <p v-if="historyCount > history.length" class="mt-2 text-xs text-sepia-400">
+        Mostrando {{ history.length }} de {{ historyCount }} relatórios.
       </p>
     </div>
 

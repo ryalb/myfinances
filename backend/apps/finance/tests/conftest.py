@@ -28,17 +28,22 @@ class FakePluggyClient:
         transactions=None,
         cards=None,
         investments=None,
+        identity=None,
     ):
         self.item = item or {"id": "item-1", "status": "UPDATED", "connectorId": "200"}
         self.accounts = accounts if accounts is not None else []
         self.transactions = transactions if transactions is not None else {}
         self.cards = cards if cards is not None else []
         self.investments = investments if investments is not None else []
+        self.identity = identity
         self.auth_calls = 0
         self.requested_account_params: list[dict] = []
 
     def fetch_item(self, item_id):
         return self.item
+
+    def fetch_item_identity(self, item_id):
+        return self.identity
 
     def _request(self, method, path, params=None):
         if path == "/accounts":
@@ -128,6 +133,10 @@ def account(db, connection):
         name="Conta Corrente",
         type=AccountType.CHECKING,
         balance=1000,
+        # classify_account_balance() usa available_balance, nao balance, para
+        # compor o patrimonio -- sem isto o saldo da fixture nunca contava
+        # como ativo em snapshot/resumo financeiro.
+        available_balance=1000,
     )
 
 

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useUiStore } from '@/stores/ui'
 import { formatBRL } from '@/composables/useCurrency'
+import { formatIsoDate } from '@/composables/useDateFormat'
 
 defineProps<{
   goal: {
@@ -47,7 +48,7 @@ const uiStore = useUiStore()
 
     <div class="mt-2 flex items-center justify-between text-xs text-sepia-500">
       <span>{{ goal.progress_percentage.toFixed(1) }} concluído</span>
-      <span v-if="goal.target_date">{{ new Date(goal.target_date).toLocaleDateString('pt-BR') }}</span>
+      <span v-if="goal.target_date">{{ formatIsoDate(goal.target_date) }}</span>
     </div>
   </div>
 </template>

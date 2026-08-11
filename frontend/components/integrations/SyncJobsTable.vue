@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { formatIsoDateTime } from '@/composables/useDateFormat'
+
 type SyncJobRow = {
   id: number
   connection: number
@@ -24,7 +26,7 @@ const statusColors: Record<string, string> = {
   failed: 'bg-rose-100 text-rose-700',
 }
 
-const formatTime = (d: string | null) => (d ? new Date(d).toLocaleString('pt-BR') : '—')
+const formatTime = formatIsoDateTime
 </script>
 
 <template>

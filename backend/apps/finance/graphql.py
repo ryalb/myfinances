@@ -16,6 +16,8 @@ from .models import (
     Account,
     CategorizationRule,
     FinancialInstitution,
+    Identity,
+    Investment,
     InvestmentPosition,
     NetWorthSnapshot,
     PensionPlan,
@@ -30,10 +32,31 @@ class FinancialInstitutionType(DjangoObjectType):
         fields = ("id", "name", "provider_id", "logo_url")
 
 
+class IdentityType(DjangoObjectType):
+    class Meta:
+        model = Identity
+        fields = (
+            "id",
+            "full_name",
+            "document",
+            "document_type",
+            "birth_date",
+            "job_title",
+            "email",
+            "phone_number",
+            "address",
+        )
+
+
 class AccountType(DjangoObjectType):
+    identity = graphene.Field(IdentityType)
+
     class Meta:
         model = Account
         fields = ("id", "name", "type", "currency", "balance", "available_balance")
+
+    def resolve_identity(self, info):
+        return getattr(self.connection, "identity", None)
 
 
 class NetWorthSnapshotType(DjangoObjectType):
@@ -88,15 +111,34 @@ class InvestmentDistributionItemType(graphene.ObjectType):
 
 
 class PensionPlanType(DjangoObjectType):
+    is_manual = graphene.Boolean()
+
     class Meta:
         model = PensionPlan
         fields = ("id", "name", "provider", "balance")
 
+    def resolve_is_manual(self, info):
+        return self.connection_id is None
+
+
+class InvestmentType(DjangoObjectType):
+    class Meta:
+        model = Investment
+        fields = ("id", "name", "kind", "currency")
+
 
 class InvestmentPositionType(DjangoObjectType):
+    # Float, nao o Decimal cru do model: o resto do schema expoe valores
+    # monetarios como Float (ver FinancialSummaryType etc.), e o graphene-django
+    # serializa DecimalField como string por padrao.
+    market_value = graphene.Float()
+
     class Meta:
         model = InvestmentPosition
         fields = ("id", "investment", "as_of_date", "quantity", "unit_price", "market_value")
+
+    def resolve_market_value(self, info):
+        return float(self.market_value)
 
 
 class SubscriptionType(DjangoObjectType):
@@ -212,7 +254,11 @@ class Query(graphene.ObjectType):
         user = info.context.user
         if not user or not user.is_authenticated:
             return Account.objects.none()
-        return Account.objects.filter(connection__user=user).order_by("name")
+        return (
+            Account.objects.filter(connection__user=user)
+            .select_related("connection", "connection__identity")
+            .order_by("name")
+        )
 
     def resolve_net_worth_history(self, info):
         user = info.context.user
@@ -418,7 +464,7 @@ class Query(graphene.ObjectType):
         user = info.context.user
         if not user or not user.is_authenticated:
             return PensionPlan.objects.none()
-        return PensionPlan.objects.filter(connection__user=user)
+        return PensionPlan.objects.filter(user=user)
 
     def resolve_investment_positions(self, info, investment_id=None):
         user = info.context.user

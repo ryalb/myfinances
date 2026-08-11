@@ -21,6 +21,7 @@ from .models import (
     AccountType,
     Card,
     ConnectionStatus,
+    Identity,
     Investment,
     InvestmentPosition,
     PensionPlan,
@@ -52,9 +53,27 @@ def _parse_booked_at(raw_date: str | None) -> datetime:
     return dt
 
 
+def _parse_date_only(raw_date: str | None) -> date_type | None:
+    if not raw_date:
+        return None
+    return _parse_booked_at(raw_date).date()
+
+
+def _int_or_none(value) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _upsert_transaction(tx: dict, *, account, card, user) -> None:
     provider_category = tx.get("category", "") or ""
     tx_type = _normalize_transaction_type(tx.get("type"))
+    merchant = tx.get("merchant") or {}
+    credit_card_metadata = tx.get("creditCardMetadata") or {}
+    payment_data = tx.get("paymentData") or {}
     Transaction.objects.update_or_create(
         external_id=tx["id"],
         defaults={
@@ -82,6 +101,92 @@ def _upsert_transaction(tx: dict, *, account, card, user) -> None:
             ),
             "provider_category": provider_category,
             "booked_at": _parse_booked_at(tx.get("date")),
+            # Campos crus da Pluggy sem uso na tela hoje -- ver comentario em
+            # `Transaction` (models.py) sobre o uso pelo relatorio de IA.
+            "description_raw": tx.get("descriptionRaw") or "",
+            "amount_in_account_currency": tx.get("amountInAccountCurrency"),
+            "balance_after": tx.get("balance"),
+            "provider_code": tx.get("providerCode") or "",
+            "status": tx.get("status") or "",
+            "operation_type": tx.get("operationType") or "",
+            "operation_type_additional_info": tx.get("operationTypeAdditionalInfo") or "",
+            "provider_transaction_id": tx.get("providerId") or "",
+            "merchant_name": merchant.get("name") or "",
+            "merchant_business_name": merchant.get("businessName") or "",
+            "merchant_cnpj": merchant.get("cnpj") or "",
+            "merchant_cnae": merchant.get("cnae") or "",
+            "installment_number": _int_or_none(credit_card_metadata.get("installmentNumber")),
+            "installment_total": _int_or_none(credit_card_metadata.get("totalInstallments")),
+            "installment_total_amount": credit_card_metadata.get("totalAmount"),
+            "purchase_date": (
+                _parse_booked_at(credit_card_metadata["purchaseDate"])
+                if credit_card_metadata.get("purchaseDate")
+                else None
+            ),
+            "payee_mcc": credit_card_metadata.get("payeeMCC") or "",
+            "bill_id": credit_card_metadata.get("billId") or "",
+            "bill_forecast_date": credit_card_metadata.get("billForecastDate") or "",
+            "payment_method": payment_data.get("paymentMethod") or "",
+            "payment_reason": payment_data.get("reason") or "",
+            "payment_reference_number": payment_data.get("referenceNumber") or "",
+            "payment_authentication_code": payment_data.get("authenticationCode") or "",
+            "payment_payer": payment_data.get("payer") or {},
+            "payment_receiver": payment_data.get("receiver") or {},
+        },
+    )
+
+
+def _primary_contact(items: list[dict] | None) -> dict:
+    """Primeiro contato marcado como principal, ou o primeiro da lista.
+
+    A Pluggy pode devolver mais de um email/telefone/endereco por titular;
+    sem um criterio de escolha o sync gravaria dados de forma inconsistente
+    a cada execucao, na ordem em que a API decidir devolver a lista.
+    """
+    if not items:
+        return {}
+    for item in items:
+        if item.get("primary") or (item.get("type") or "").upper() == "PERSONAL":
+            return item
+    return items[0]
+
+
+def _upsert_identity(connection, identity_data: dict) -> None:
+    document = identity_data.get("taxNumber") or identity_data.get("document") or ""
+    document_type = identity_data.get("documentType") or ("CPF" if document else "")
+
+    birth_date = None
+    raw_birth_date = identity_data.get("birthDate")
+    if raw_birth_date:
+        birth_date = _parse_booked_at(raw_birth_date).date()
+
+    qualifications = identity_data.get("qualifications") or {}
+    informed_income = qualifications.get("informedIncome") or {}
+    informed_patrimony = qualifications.get("informedPatrimony") or {}
+    marital_status = identity_data.get("maritalStatus") or {}
+
+    Identity.objects.update_or_create(
+        connection=connection,
+        defaults={
+            "external_id": identity_data.get("id") or "",
+            "full_name": identity_data.get("fullName") or "",
+            "document": document,
+            "document_type": document_type,
+            "birth_date": birth_date,
+            "job_title": identity_data.get("jobTitle") or "",
+            "email": _primary_contact(identity_data.get("emails")).get("value") or "",
+            "phone_number": _primary_contact(identity_data.get("phoneNumbers")).get("value") or "",
+            "address": _primary_contact(identity_data.get("addresses")).get("fullAddress") or "",
+            # Campos crus da Pluggy sem uso na tela hoje -- ver comentario em
+            # `Identity` (models.py) sobre o uso pelo relatorio de IA.
+            "investor_profile": identity_data.get("investorProfile") or "",
+            "sex": identity_data.get("sex") or "",
+            "marital_status": marital_status.get("code") or "",
+            "social_name": identity_data.get("socialName") or "",
+            "occupation_description": qualifications.get("occupationDescription") or "",
+            "informed_income_amount": informed_income.get("amount"),
+            "informed_income_frequency": informed_income.get("frequency") or "",
+            "informed_patrimony_amount": informed_patrimony.get("amount"),
         },
     )
 
@@ -99,7 +204,19 @@ def _broadcast_sync_event(user_id: int, status: str, connection_id: int, sync_jo
     )
 
 
-def _normalize_account_type(raw_type: str | None) -> str:
+def _normalize_account_type(raw_type: str | None, raw_subtype: str | None = None) -> str:
+    # `subtype` distingue CHECKINGS_ACCOUNT de SAVINGS_ACCOUNT; `type` sozinho e
+    # sempre "BANK" (o /accounts e filtrado por type=BANK), o que fazia toda
+    # conta poupanca cair em CHECKING por falta de sinal mais especifico.
+    subtype_mapping = {
+        "checkings_account": AccountType.CHECKING,
+        "savings_account": AccountType.SAVINGS,
+        "credit_card": AccountType.CREDIT,
+    }
+    normalized_subtype = subtype_mapping.get((raw_subtype or "").lower())
+    if normalized_subtype:
+        return normalized_subtype
+
     value = (raw_type or "").lower()
     mapping = {
         "checking": AccountType.CHECKING,
@@ -169,6 +286,72 @@ def _due_date_for(year: int, month: int, due_day: int) -> date_type:
         return date_type(year, month, 28)
 
 
+# Debito real raramente cai exatamente no dia calculado (fim de semana, atraso de
+# lancamento, dia de corte do cartao). 5 dias cobre isso e ainda fica bem abaixo da
+# distancia entre vencimentos de meses consecutivos (~28-31 dias), entao as janelas
+# de dois meses da mesma assinatura nao se sobrepoem.
+RECONCILE_MATCH_TOLERANCE_DAYS = 5
+
+
+def _candidate_transactions(
+    transactions_by_date: dict[date_type, list[Transaction]], due_date: date_type
+) -> list[Transaction]:
+    candidates = []
+    for offset in range(-RECONCILE_MATCH_TOLERANCE_DAYS, RECONCILE_MATCH_TOLERANCE_DAYS + 1):
+        candidates.extend(transactions_by_date.get(due_date + timedelta(days=offset), ()))
+    return candidates
+
+
+def _best_match(
+    sub: Subscription,
+    due_date: date_type,
+    candidates: list[Transaction],
+    used_transaction_ids: set[int],
+) -> Transaction | None:
+    name = (sub.name or "").lower()
+    category = (sub.category or "").lower()
+
+    matches = [
+        tx
+        for tx in candidates
+        if tx.id not in used_transaction_ids
+        and (
+            # Bidirecional: o nome da assinatura costuma levar um sufixo que o
+            # usuario adiciona so para desambiguar duas cobrancas iguais (ex.:
+            # "Claro Flex - Ryan" e "Claro Flex - Sheyla" quando as duas linhas
+            # chegam do banco como a mesma descricao "Claro Flex"). Exigir a
+            # string inteira do nome dentro da descricao nunca casava nesse caso.
+            (
+                name
+                and (tx.description or "")
+                and (
+                    name in (tx.description or "").lower()
+                    or (tx.description or "").lower() in name
+                )
+            )
+            or (category and category in (tx.category or "").lower())
+        )
+        # `payment_account` so referencia Account, nunca Card -- uma transacao de
+        # cartao (account_id is None) nao tem como ser escopada por ele, e excluir
+        # esses candidatos travava o match de toda assinatura paga no cartao.
+        and (
+            sub.payment_account_id is None
+            or tx.account_id is None
+            or tx.account_id == sub.payment_account_id
+        )
+    ]
+    if not matches:
+        return None
+
+    return min(
+        matches,
+        key=lambda tx: (
+            abs((tx.booked_at.date() - due_date).days),
+            abs(tx.amount - sub.amount),
+        ),
+    )
+
+
 def _reconcile_subscriptions(user) -> None:
     """Reconcile subscription payments against transactions.
 
@@ -227,38 +410,36 @@ def _reconcile_subscriptions(user) -> None:
         ):
             existing[(payment.subscription_id, payment.due_date)] = payment
 
+    tolerance = timedelta(days=RECONCILE_MATCH_TOLERANCE_DAYS)
     transactions_by_date: dict[date_type, list[Transaction]] = {}
     for tx in Transaction.objects.filter(
         Q(account__connection__user=user) | Q(card__connection__user=user),
-        booked_at__date__gte=window_start,
-        booked_at__date__lte=window_end,
+        booked_at__date__gte=window_start - tolerance,
+        booked_at__date__lte=window_end + tolerance,
         amount__gt=0,
     ):
         transactions_by_date.setdefault(tx.booked_at.date(), []).append(tx)
 
     to_update: list[SubscriptionPayment] = []
+    # Uma transacao so serve para um pagamento -- sem isto, a janela mais larga
+    # deixaria duas assinaturas com nome/categoria parecidos (ex.: dois
+    # streamings) reclamarem o mesmo debito.
+    used_transaction_ids: set[int] = set()
     for sub in subscriptions:
-        name = (sub.name or "").lower()
-        category = (sub.category or "").lower()
         for due_date in wanted[sub.id]:
             payment = existing.get((sub.id, due_date))
             if payment is None:
                 continue
 
-            matching_tx = next(
-                (
-                    tx
-                    for tx in transactions_by_date.get(due_date, ())
-                    if (name and name in (tx.description or "").lower())
-                    or (category and category in (tx.category or "").lower())
-                ),
-                None,
-            )
+            candidates = _candidate_transactions(transactions_by_date, due_date)
+            matching_tx = _best_match(sub, due_date, candidates, used_transaction_ids)
 
             if matching_tx:
+                used_transaction_ids.add(matching_tx.id)
                 payment.status = SubscriptionStatus.PAID
                 payment.paid_date = matching_tx.booked_at.date()
                 payment.paid_amount = matching_tx.amount
+                payment.matched_transaction = matching_tx
             elif due_date < today and payment.status == SubscriptionStatus.PENDING:
                 payment.status = SubscriptionStatus.OVERDUE
             else:
@@ -267,7 +448,9 @@ def _reconcile_subscriptions(user) -> None:
             to_update.append(payment)
 
     if to_update:
-        SubscriptionPayment.objects.bulk_update(to_update, ["status", "paid_date", "paid_amount"])
+        SubscriptionPayment.objects.bulk_update(
+            to_update, ["status", "paid_date", "paid_amount", "matched_transaction"]
+        )
 
 
 # Previdencia privada na Pluggy e `type: "SECURITY"`, com `subtype` em
@@ -341,9 +524,13 @@ def _sync_pension_plans(client, connection) -> None:
             connection=connection,
             external_id=investment_data["id"],
             defaults={
+                "user": connection.user,
                 "name": investment_data.get("name", "Previdência"),
                 "provider": _pension_provider(investment_data, connection),
                 "balance": investment_data.get("balance", 0) or 0,
+                "annual_rate": investment_data.get("annualRate"),
+                "amount_profit": investment_data.get("amountProfit"),
+                "amount_original": investment_data.get("amountOriginal"),
             },
         )
 
@@ -389,6 +576,17 @@ def sync_connection_data(sync_job_id: int) -> None:
                 exc,
             )
 
+        try:
+            identity_data = client.fetch_item_identity(connection.external_id)
+            if identity_data:
+                _upsert_identity(connection, identity_data)
+        except Exception as exc:
+            logger.warning(
+                "Error fetching identity for connection %s: %s",
+                connection.external_id,
+                exc,
+            )
+
         from_date = None
         if connection.last_synced_at:
             from_date = (connection.last_synced_at - timedelta(days=2)).date().isoformat()
@@ -402,15 +600,26 @@ def sync_connection_data(sync_job_id: int) -> None:
         account_map: dict[str, Account] = {}
 
         for item in accounts_data:
+            bank_data = item.get("bankData") or {}
             account, _ = Account.objects.update_or_create(
                 external_id=item["id"],
                 defaults={
                     "connection": connection,
                     "name": item.get("name", "Conta"),
-                    "type": _normalize_account_type(item.get("type")),
+                    "number": bank_data.get("transferNumber", ""),
+                    "type": _normalize_account_type(item.get("type"), item.get("subtype")),
                     "currency": item.get("currencyCode", "BRL"),
                     "balance": item.get("balance", 0) or 0,
                     "available_balance": item.get("availableBalance", item.get("balance", 0)) or 0,
+                    # Campos crus da Pluggy sem uso na tela hoje -- ver comentario
+                    # em `Account` (models.py) sobre o uso pelo relatorio de IA.
+                    "subtype": item.get("subtype") or "",
+                    "marketing_name": item.get("marketingName") or "",
+                    "owner_name": item.get("owner") or "",
+                    "tax_number": item.get("taxNumber") or "",
+                    "closing_balance": bank_data.get("closingBalance"),
+                    "overdraft_limit": bank_data.get("overdraftContractedLimit"),
+                    "overdraft_used": bank_data.get("overdraftUsedLimit"),
                 },
             )
             account_map[account.external_id] = account
@@ -462,6 +671,16 @@ def sync_connection_data(sync_job_id: int) -> None:
                         "current_balance": card_data.get("balance", 0) or 0,
                         "due_day": _extract_day(due_date),
                         "close_day": _extract_day(close_date),
+                        # Campos crus da Pluggy sem uso na tela hoje -- ver
+                        # comentario em `Card` (models.py) sobre o uso pelo
+                        # relatorio de IA.
+                        "brand": credit_data.get("brand") or "",
+                        "level": credit_data.get("level") or "",
+                        "available_credit_limit": credit_data.get("availableCreditLimit"),
+                        "minimum_payment": credit_data.get("minimumPayment"),
+                        "is_limit_flexible": credit_data.get("isLimitFlexible"),
+                        "status": credit_data.get("status") or "",
+                        "holder_type": credit_data.get("holderType") or "",
                     },
                 )
                 _sync_card_transactions(client, card, from_date)
@@ -516,6 +735,23 @@ def sync_connection_data(sync_job_id: int) -> None:
                         "name": investment_data.get("name", "Investimento"),
                         "kind": investment_data.get("type", "other"),
                         "currency": investment_data.get("currencyCode", "BRL"),
+                        # Campos crus da Pluggy sem uso na tela hoje -- ver
+                        # comentario em `Investment` (models.py) sobre o uso pelo
+                        # relatorio de IA.
+                        "subtype": investment_data.get("subtype") or "",
+                        "number": investment_data.get("number") or "",
+                        "isin": investment_data.get("isin") or "",
+                        "code": investment_data.get("code") or "",
+                        "issuer": investment_data.get("issuer") or "",
+                        "issuer_cnpj": investment_data.get("issuerCNPJ") or "",
+                        "issue_date": _parse_date_only(investment_data.get("issueDate")),
+                        "due_date": _parse_date_only(investment_data.get("dueDate")),
+                        "rate_type": investment_data.get("rateType") or "",
+                        "tax_exempt": investment_data.get("taxExempt"),
+                        "rate_periodicity": investment_data.get("ratePeriodicity") or "",
+                        "indexer_additional_info": (
+                            investment_data.get("indexerAdditionalInfo") or ""
+                        ),
                     },
                 )
                 InvestmentPosition.objects.update_or_create(
@@ -527,6 +763,22 @@ def sync_connection_data(sync_job_id: int) -> None:
                         # nao existe no payload, entao unit_price era sempre zero.
                         "unit_price": investment_data.get("value", 0) or 0,
                         "market_value": investment_data.get("balance", 0) or 0,
+                        # Rentabilidade/estado do dia (campos crus da Pluggy) --
+                        # ver comentario em `InvestmentPosition` (models.py).
+                        "last_month_rate": investment_data.get("lastMonthRate"),
+                        "last_twelve_months_rate": investment_data.get("lastTwelveMonthsRate"),
+                        "annual_rate": investment_data.get("annualRate"),
+                        "fixed_annual_rate": investment_data.get("fixedAnnualRate"),
+                        "rate": investment_data.get("rate"),
+                        "amount_profit": investment_data.get("amountProfit"),
+                        "amount_withdrawal": investment_data.get("amountWithdrawal"),
+                        "amount_original": investment_data.get("amountOriginal"),
+                        "price_factor": investment_data.get("priceFactor"),
+                        "status": investment_data.get("status") or "",
+                        "purchase_date": _parse_date_only(investment_data.get("purchaseDate")),
+                        "grace_period_date": _parse_date_only(
+                            investment_data.get("gracePeriodDate")
+                        ),
                     },
                 )
         except Exception as exc:

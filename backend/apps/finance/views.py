@@ -6,11 +6,12 @@ from datetime import date as date_type
 from uuid import UUID
 
 from django.conf import settings
-from django.db.models import Q
+from django.db.models import Prefetch, Q
 from django.http import StreamingHttpResponse
 from django.utils import timezone
 from rest_framework import permissions, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
@@ -40,6 +41,7 @@ from .models import (
     InvestmentPosition,
     NetWorthSnapshot,
     PensionPlan,
+    PortfolioReport,
     Subscription,
     SubscriptionPayment,
     SyncJob,
@@ -58,6 +60,7 @@ from .serializers import (
     InvestmentSerializer,
     MonthlyCashFlowSerializer,
     PensionPlanSerializer,
+    PortfolioReportSerializer,
     RegisterSerializer,
     SubscriptionPaymentSerializer,
     SubscriptionSerializer,
@@ -158,7 +161,7 @@ class AccountViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         return Account.objects.filter(connection__user=self.request.user).select_related(
-            "connection"
+            "connection", "connection__identity"
         )
 
 
@@ -168,7 +171,9 @@ class TransactionViewSet(viewsets.ReadOnlyModelViewSet):
     pagination_class = UnboundedCollectionPagination
 
     def get_queryset(self):
-        queryset = user_transactions(self.request.user).select_related("account", "card")
+        queryset = user_transactions(self.request.user).select_related(
+            "account__connection__institution", "card__connection__institution"
+        )
         return filter_transactions(queryset, self.request.query_params).order_by("-booked_at")
 
     @action(detail=False, methods=["get"], url_path="categories")
@@ -217,14 +222,38 @@ class InvestmentPositionViewSet(viewsets.ReadOnlyModelViewSet):
         ).select_related("investment")
 
 
-class PensionPlanViewSet(viewsets.ReadOnlyModelViewSet):
+class PensionPlanViewSet(viewsets.ModelViewSet):
+    """Previdencia privada.
+
+    Escrita existe so para o lancamento manual: a Pluggy cobre Open Finance, e
+    PGBL/VGBL fica no Open Insurance (Susep), fora do escopo dela -- entao a
+    sincronizacao automatica normalmente nao traz esse dado. `perform_update` e
+    `perform_destroy` bloqueiam edicao de planos que vieram sincronizados
+    (`connection` preenchido), que devem ser alterados apenas pelo sync.
+    """
+
     serializer_class = PensionPlanSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        return PensionPlan.objects.filter(connection__user=self.request.user).select_related(
-            "connection"
-        )
+        return PensionPlan.objects.filter(user=self.request.user).select_related("connection")
+
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user, connection=None)
+
+    def perform_update(self, serializer):
+        if serializer.instance.connection_id is not None:
+            raise PermissionDenied(
+                "Planos sincronizados via Open Finance não podem ser editados manualmente."
+            )
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        if instance.connection_id is not None:
+            raise PermissionDenied(
+                "Planos sincronizados via Open Finance não podem ser excluídos manualmente."
+            )
+        instance.delete()
 
 
 class SyncJobViewSet(viewsets.ReadOnlyModelViewSet):
@@ -545,8 +574,13 @@ class SubscriptionViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        return Subscription.objects.filter(user=self.request.user).select_related(
-            "connection", "payment_account"
+        payments = SubscriptionPayment.objects.select_related(
+            "matched_transaction", "matched_transaction__account", "matched_transaction__card"
+        )
+        return (
+            Subscription.objects.filter(user=self.request.user)
+            .select_related("connection", "payment_account")
+            .prefetch_related(Prefetch("payments", queryset=payments))
         )
 
     def perform_create(self, serializer):
@@ -560,7 +594,9 @@ class SubscriptionPaymentViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         return SubscriptionPayment.objects.filter(
             subscription__user=self.request.user
-        ).select_related("subscription")
+        ).select_related(
+            "subscription", "matched_transaction", "matched_transaction__account", "matched_transaction__card"
+        )
 
 
 class CategorizationRuleViewSet(viewsets.ModelViewSet):
@@ -733,5 +769,33 @@ class PortfolioReportAPIView(APIView):
             logger.warning("Relatorio de portfolio indisponivel: %s", exc)
             return Response({"error": str(exc)}, status=503)
 
-        report["index"] = index_stats
-        return Response(report)
+        # Persistido para referencia futura: sem isto o relatorio so existia no
+        # estado do frontend, e um refresh de pagina perdia a analise.
+        saved = PortfolioReport.objects.create(
+            user=request.user,
+            query=query,
+            summary=report.get("summary", ""),
+            projections=report.get("projections", ""),
+            strengths=report.get("strengths", []),
+            weaknesses=report.get("weaknesses", []),
+            adjustments=report.get("adjustments", []),
+            suggestions=report.get("suggestions", []),
+            disclaimer=report.get("disclaimer", ""),
+            sources=report.get("sources", []),
+        )
+
+        data = PortfolioReportSerializer(saved).data
+        # `index` e estatistica da indexacao desta chamada, nao do relatorio em si
+        # -- fica de fora do modelo persistido para nao gravar um dado que so faz
+        # sentido no momento da geracao.
+        data["index"] = index_stats
+        return Response(data)
+
+
+class PortfolioReportViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = PortfolioReportSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    pagination_class = UnboundedCollectionPagination
+
+    def get_queryset(self):
+        return PortfolioReport.objects.filter(user=self.request.user)

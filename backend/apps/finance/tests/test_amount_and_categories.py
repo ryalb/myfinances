@@ -235,6 +235,112 @@ def test_savings_rate_stays_within_100_percent(user, account):
 
 
 @pytest.mark.django_db
+def test_credit_card_bill_payment_is_excluded_from_income_and_expenses(user, account, connection):
+    """O credito no cartao (abate divida) e o debito na conta (saida real) sao a
+    mesma fatura pelos dois lados -- nenhum dos dois e receita ou despesa nova."""
+    from apps.finance.models import Card
+
+    card = Card.objects.create(connection=connection, external_id="card-bill", name="Cartao")
+
+    _upsert_transaction(
+        {
+            "id": "tx-bill-account",
+            "description": "Pagamento de fatura Cartao",
+            "amount": -1000.0,
+            "type": "DEBIT",
+            "category": "Credit card payment",
+            "date": "2026-08-05T12:00:00.000Z",
+        },
+        account=account,
+        card=None,
+        user=user,
+    )
+    _upsert_transaction(
+        {
+            "id": "tx-bill-card",
+            "description": "Pagamento recebido",
+            "amount": -1000.0,
+            "type": "CREDIT",
+            "category": "Credit card payment",
+            "date": "2026-08-05T12:00:00.000Z",
+        },
+        account=None,
+        card=card,
+        user=user,
+    )
+    _upsert_transaction(
+        {
+            "id": "tx-salario",
+            "description": "Salario",
+            "amount": 5000.0,
+            "type": "CREDIT",
+            "date": "2026-08-01T12:00:00.000Z",
+        },
+        account=account,
+        card=None,
+        user=user,
+    )
+
+    flow = build_monthly_cash_flow(user, year=2026, month=8)
+
+    assert flow["income"] == Decimal("5000.00")
+    assert flow["expenses"] == Decimal("0.00")
+
+
+@pytest.mark.django_db
+def test_same_person_transfer_is_excluded_from_cash_flow(user, account):
+    """PIX entre contas do mesmo titular nao e receita nem despesa, so troca de
+    bolso -- categoria vem da Pluggy como 'Same person transfer'."""
+    from apps.finance.models import Account, AccountType, Connection, ConnectionStatus
+
+    other_connection = Connection.objects.create(
+        user=user,
+        institution=account.connection.institution,
+        external_id="item-2",
+        status=ConnectionStatus.PENDING,
+    )
+    other_account = Account.objects.create(
+        connection=other_connection,
+        external_id="acc-2",
+        name="Conta Poupanca",
+        type=AccountType.SAVINGS,
+        balance=0,
+    )
+
+    _upsert_transaction(
+        {
+            "id": "tx-transfer-out",
+            "description": "PIX para poupanca",
+            "amount": -300.0,
+            "type": "DEBIT",
+            "category": "Same person transfer",
+            "date": "2026-08-05T12:00:00.000Z",
+        },
+        account=account,
+        card=None,
+        user=user,
+    )
+    _upsert_transaction(
+        {
+            "id": "tx-transfer-in",
+            "description": "PIX recebido",
+            "amount": 300.0,
+            "type": "CREDIT",
+            "category": "Same person transfer",
+            "date": "2026-08-05T12:00:00.000Z",
+        },
+        account=other_account,
+        card=None,
+        user=user,
+    )
+
+    flow = build_monthly_cash_flow(user, year=2026, month=8)
+
+    assert flow["income"] == Decimal("0.00")
+    assert flow["expenses"] == Decimal("0.00")
+
+
+@pytest.mark.django_db
 def test_subscription_reconciliation_matches_a_negative_debit(user, account):
     """`_reconcile_subscriptions` filtra `amount__gt=0`. Com o valor negativo, o
     pagamento nunca casava e a assinatura ficava eternamente pendente."""

@@ -267,6 +267,11 @@ curl -s http://localhost:11434/api/tags | grep -o '"name":"[^"]*"'
 Configuração por variável de ambiente: `OLLAMA_URL`, `OLLAMA_EMBEDDING_MODEL`
 (default `nomic-embed-text`), `OLLAMA_CHAT_MODEL` (default `qwen2.5:14b`).
 
+```bash
+docker compose exec ollama ollama pull qwen2.5:14b
+docker compose exec ollama ollama pull nomic-embed-text
+```
+
 **Inferência remota é recusada por padrão.** O contexto enviado ao modelo inclui
 saldos, transações, instituições e metas — um `OLLAMA_URL` apontando para fora
 exportaria tudo isso em silêncio. Host não-local responde `503` com a razão; use

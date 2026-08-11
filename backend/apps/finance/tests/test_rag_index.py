@@ -10,6 +10,7 @@ Tres defeitos motivam este arquivo, todos observados no codigo anterior:
    estava na imagem do Postgres e nao era usado.
 """
 
+from datetime import date
 from decimal import Decimal
 
 import pytest
@@ -20,6 +21,7 @@ from apps.finance.ai_services import (
     AIServiceUnavailable,
     Document,
     RAGService,
+    _format_amount,
     build_user_documents,
 )
 from apps.finance.models import (
@@ -30,6 +32,8 @@ from apps.finance.models import (
     DocumentChunkStatus,
     Embedding,
     FinancialGoal,
+    Investment,
+    InvestmentPosition,
     Subscription,
     SubscriptionCategory,
     Transaction,
@@ -162,6 +166,103 @@ def test_document_content_is_scoped_to_the_user(user, other_user, connection, ac
     blob = "\n".join(doc.content for doc in build_user_documents(user))
 
     assert "Conta secreta do outro" not in blob
+
+
+# --------------------------------------------------------------------------
+# Formatacao de moeda no padrao brasileiro
+# --------------------------------------------------------------------------
+
+
+def test_format_amount_uses_brazilian_separators():
+    assert _format_amount(Decimal("334106.25")) == "R$ 334.106,25"
+
+
+def test_format_amount_appends_currency_code_when_not_brl():
+    assert _format_amount(Decimal("100.5"), "USD") == "100,50 USD"
+
+
+@pytest.mark.django_db
+def test_account_document_formats_balance_in_brazilian_currency(user, connection, account):
+    account.balance = Decimal("180149.30")
+    account.available_balance = Decimal("180149.30")
+    account.save()
+
+    document = next(doc for doc in build_user_documents(user) if doc.source_type == "accounts")
+
+    assert "R$ 180.149,30" in document.content
+    assert "180149.3" not in document.content
+
+
+# --------------------------------------------------------------------------
+# Performance e distribuicao de investimentos
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_investments_document_reports_quota_variation_across_positions(user, connection):
+    """O usuario quer saber se os fundos estao com performance boa -- sem
+    comparar duas datas, a LLM so tinha a foto do dia, nunca a tendencia."""
+    investment = Investment.objects.create(
+        connection=connection, external_id="inv-1", name="Fundo XP", kind="MUTUAL_FUND"
+    )
+    InvestmentPosition.objects.create(
+        investment=investment,
+        as_of_date=date(2026, 6, 1),
+        quantity=100,
+        unit_price=Decimal("100.00"),
+        market_value=Decimal("10000.00"),
+    )
+    InvestmentPosition.objects.create(
+        investment=investment,
+        as_of_date=date(2026, 8, 1),
+        quantity=100,
+        unit_price=Decimal("103.00"),
+        market_value=Decimal("10300.00"),
+    )
+
+    document = next(doc for doc in build_user_documents(user) if doc.source_type == "investments")
+
+    assert "variacao de +3.00%" in document.content
+    assert "2026-06-01" in document.content
+
+
+@pytest.mark.django_db
+def test_investments_document_reports_distribution_by_kind(user, connection):
+    """Sinal direto de concentracao de risco pra LLM sugerir diversificacao."""
+    fund = Investment.objects.create(
+        connection=connection, external_id="inv-1", name="Fundo XP", kind="MUTUAL_FUND"
+    )
+    fii = Investment.objects.create(
+        connection=connection, external_id="inv-2", name="FII Tijolo", kind="FII"
+    )
+    InvestmentPosition.objects.create(
+        investment=fund, as_of_date=date.today(), market_value=Decimal("8000.00")
+    )
+    InvestmentPosition.objects.create(
+        investment=fii, as_of_date=date.today(), market_value=Decimal("2000.00")
+    )
+
+    document = next(doc for doc in build_user_documents(user) if doc.source_type == "investments")
+
+    assert "MUTUAL_FUND: R$ 8.000,00 (80.0% da carteira)" in document.content
+    assert "FII: R$ 2.000,00 (20.0% da carteira)" in document.content
+
+
+@pytest.mark.django_db
+def test_investments_document_skips_performance_with_a_single_position(user, connection):
+    investment = Investment.objects.create(
+        connection=connection, external_id="inv-1", name="Fundo XP", kind="MUTUAL_FUND"
+    )
+    InvestmentPosition.objects.create(
+        investment=investment,
+        as_of_date=date.today(),
+        unit_price=Decimal("100.00"),
+        market_value=Decimal("10000.00"),
+    )
+
+    document = next(doc for doc in build_user_documents(user) if doc.source_type == "investments")
+
+    assert "variacao" not in document.content
 
 
 def test_digest_changes_with_content():
@@ -353,6 +454,34 @@ def test_report_context_always_includes_the_summary(rag, user, connection, accou
     assert types.count(SUMMARY_SOURCE_TYPE) == 1, "resumo duplicado no contexto"
 
 
+@pytest.mark.django_db
+def test_report_context_always_includes_investments(rag, user, connection, account):
+    """Avaliar performance da carteira e sugerir aportes e o pedido mais comum
+    deste relatorio -- sem ancorar, o documento dependia da sorte da busca
+    semantica contra meses de transacoes."""
+    investment = Investment.objects.create(
+        connection=connection, external_id="inv-1", name="Fundo XP", kind="MUTUAL_FUND"
+    )
+    InvestmentPosition.objects.create(
+        investment=investment, as_of_date=date.today(), market_value=Decimal("1000.00")
+    )
+    for day in range(1, 20):
+        Transaction.objects.create(
+            account=account,
+            external_id=f"tx-inv-{day}",
+            description="Compra no mercado",
+            amount=Decimal("100.00"),
+            type=TransactionType.DEBIT,
+            booked_at=timezone.now(),
+        )
+    rag.index_user_context(user)
+
+    context = rag.retrieve_report_context(user, "gastos do mes", top_k=2)
+
+    types = [item["chunk"].source_type for item in context]
+    assert types.count("investments") == 1
+
+
 # --------------------------------------------------------------------------
 # Falhas da dependencia local
 # --------------------------------------------------------------------------
@@ -365,9 +494,7 @@ def test_wrong_embedding_dimension_fails_with_a_clear_message(user, monkeypatch)
     service = RAGService()
 
     class Response:
-        @staticmethod
-        def raise_for_status():
-            return None
+        status_code = 200
 
         @staticmethod
         def json():

@@ -5,10 +5,14 @@ A funcao foi reescrita para resolver a janela em um numero fixo de queries
 Estes testes travam o comportamento observavel e o custo em queries.
 """
 
+from datetime import timedelta
+
 import pytest
 from django.utils import timezone
 
 from apps.finance.models import (
+    Account,
+    AccountType,
     Subscription,
     SubscriptionCategory,
     SubscriptionPayment,
@@ -17,6 +21,17 @@ from apps.finance.models import (
     TransactionType,
 )
 from apps.finance.tasks import _due_date_for, _reconcile_subscriptions
+
+
+def _booked_at(day):
+    return timezone.make_aware(timezone.datetime.combine(day, timezone.datetime.min.time()))
+
+
+def _previous_month_due_date(due_day):
+    last_day_of_previous_month = timezone.localdate().replace(day=1) - timedelta(days=1)
+    return _due_date_for(
+        last_day_of_previous_month.year, last_day_of_previous_month.month, due_day
+    )
 
 
 @pytest.fixture
@@ -176,3 +191,233 @@ def test_clamps_due_day_to_short_months():
     assert _due_date_for(2026, 2, 31).day == 28
     assert _due_date_for(2026, 4, 31).day == 30
     assert _due_date_for(2026, 1, 31).day == 31
+
+
+@pytest.mark.django_db
+def test_matches_transaction_within_tolerance_window(subscription, user, account):
+    """Debito real raramente cai exatamente no dia calculado -- por isso existe
+    uma janela de tolerancia em vez de exigir o dia exato."""
+    today = timezone.localdate()
+    due_date = _due_date_for(today.year, today.month, subscription.due_day)
+
+    tx = Transaction.objects.create(
+        account=account,
+        external_id="tx-netflix-atraso",
+        description="Pagamento NETFLIX mensal",
+        amount=55,
+        type=TransactionType.DEBIT,
+        booked_at=_booked_at(due_date + timedelta(days=3)),
+    )
+
+    _reconcile_subscriptions(user)
+
+    payment = SubscriptionPayment.objects.get(subscription=subscription, due_date=due_date)
+    assert payment.status == SubscriptionStatus.PAID
+    assert payment.paid_date == due_date + timedelta(days=3)
+    assert payment.matched_transaction_id == tx.id
+
+
+@pytest.mark.django_db
+def test_does_not_match_transaction_outside_tolerance_window(subscription, user, account):
+    due_date = _previous_month_due_date(subscription.due_day)
+
+    Transaction.objects.create(
+        account=account,
+        external_id="tx-netflix-longe",
+        description="Pagamento NETFLIX mensal",
+        amount=55,
+        type=TransactionType.DEBIT,
+        booked_at=_booked_at(due_date + timedelta(days=10)),
+    )
+
+    _reconcile_subscriptions(user)
+
+    payment = SubscriptionPayment.objects.get(subscription=subscription, due_date=due_date)
+    assert payment.status == SubscriptionStatus.OVERDUE
+    assert payment.matched_transaction_id is None
+
+
+@pytest.mark.django_db
+def test_scopes_match_to_payment_account_when_set(user, connection, account):
+    other_account = Account.objects.create(
+        connection=connection,
+        external_id="acc-2",
+        name="Conta Poupança",
+        type=AccountType.SAVINGS,
+    )
+    sub = Subscription.objects.create(
+        user=user,
+        connection=connection,
+        name="Netflix",
+        category=SubscriptionCategory.STREAMING,
+        amount=55,
+        due_day=10,
+        payment_account=account,
+    )
+    today = timezone.localdate()
+    due_date = _due_date_for(today.year, today.month, sub.due_day)
+
+    Transaction.objects.create(
+        account=other_account,
+        external_id="tx-conta-errada",
+        description="Pagamento NETFLIX mensal",
+        amount=55,
+        type=TransactionType.DEBIT,
+        booked_at=_booked_at(due_date),
+    )
+    tx_right_account = Transaction.objects.create(
+        account=account,
+        external_id="tx-conta-certa",
+        description="Pagamento NETFLIX mensal",
+        amount=55,
+        type=TransactionType.DEBIT,
+        booked_at=_booked_at(due_date + timedelta(days=1)),
+    )
+
+    _reconcile_subscriptions(user)
+
+    payment = SubscriptionPayment.objects.get(subscription=sub, due_date=due_date)
+    assert payment.status == SubscriptionStatus.PAID
+    assert payment.matched_transaction_id == tx_right_account.id
+
+
+@pytest.mark.django_db
+def test_matches_card_transaction_even_when_payment_account_is_set(user, connection, account):
+    """`payment_account` referencia Account, nunca Card. Uma assinatura paga no
+    cartao (ex.: escolhida so por costume, sem reflexo em qual instrumento cobra)
+    nao pode ficar sem match so porque tem uma conta de referencia cadastrada."""
+    from apps.finance.models import Card
+
+    card = Card.objects.create(connection=connection, external_id="card-1", name="Cartão")
+    sub = Subscription.objects.create(
+        user=user,
+        connection=connection,
+        name="Claro Flex",
+        category=SubscriptionCategory.PHONE,
+        amount=44.90,
+        due_day=8,
+        payment_account=account,
+    )
+    today = timezone.localdate()
+    due_date = _due_date_for(today.year, today.month, sub.due_day)
+
+    tx = Transaction.objects.create(
+        card=card,
+        external_id="tx-claro-flex-cartao",
+        description="Claro Flex",
+        amount=44.90,
+        type=TransactionType.DEBIT,
+        booked_at=_booked_at(due_date),
+    )
+
+    _reconcile_subscriptions(user)
+
+    payment = SubscriptionPayment.objects.get(subscription=sub, due_date=due_date)
+    assert payment.status == SubscriptionStatus.PAID
+    assert payment.matched_transaction_id == tx.id
+
+
+@pytest.mark.django_db
+def test_matches_when_subscription_name_has_disambiguating_suffix(user, connection, account):
+    """Usuario apelida duas linhas da mesma operadora ("Claro Flex - Ryan",
+    "Claro Flex - Sheyla") para distingui-las, mas o banco manda as duas com a
+    mesma descricao "Claro Flex" -- o sufixo nao pode impedir o match."""
+    sub_ryan = Subscription.objects.create(
+        user=user, connection=connection, name="Claro Flex - Ryan",
+        category=SubscriptionCategory.PHONE, amount="44.90", due_day=8,
+    )
+    sub_sheyla = Subscription.objects.create(
+        user=user, connection=connection, name="Claro Flex - Sheyla",
+        category=SubscriptionCategory.PHONE, amount="39.99", due_day=30,
+    )
+    today = timezone.localdate()
+    due_date_ryan = _due_date_for(today.year, today.month, sub_ryan.due_day)
+    due_date_sheyla = _due_date_for(today.year, today.month, sub_sheyla.due_day)
+
+    tx_ryan = Transaction.objects.create(
+        account=account,
+        external_id="tx-claro-flex-ryan",
+        description="Claro Flex",
+        amount="44.90",
+        type=TransactionType.DEBIT,
+        booked_at=_booked_at(due_date_ryan),
+    )
+    tx_sheyla = Transaction.objects.create(
+        account=account,
+        external_id="tx-claro-flex-sheyla",
+        description="Claro Flex",
+        amount="39.99",
+        type=TransactionType.DEBIT,
+        booked_at=_booked_at(due_date_sheyla),
+    )
+
+    _reconcile_subscriptions(user)
+
+    payment_ryan = SubscriptionPayment.objects.get(subscription=sub_ryan, due_date=due_date_ryan)
+    payment_sheyla = SubscriptionPayment.objects.get(
+        subscription=sub_sheyla, due_date=due_date_sheyla
+    )
+    assert payment_ryan.status == SubscriptionStatus.PAID
+    assert payment_ryan.matched_transaction_id == tx_ryan.id
+    assert payment_sheyla.status == SubscriptionStatus.PAID
+    assert payment_sheyla.matched_transaction_id == tx_sheyla.id
+
+
+@pytest.mark.django_db
+def test_does_not_double_claim_the_same_transaction(user, connection, account):
+    """Janela mais larga aumenta a chance de duas assinaturas com nome/categoria
+    parecidos colidirem no mesmo debito -- uma transacao serve para um pagamento."""
+    sub_a = Subscription.objects.create(
+        user=user, connection=connection, name="Streaming A",
+        category=SubscriptionCategory.STREAMING, amount=30, due_day=10,
+    )
+    sub_b = Subscription.objects.create(
+        user=user, connection=connection, name="Streaming B",
+        category=SubscriptionCategory.STREAMING, amount=30, due_day=10,
+    )
+    today = timezone.localdate()
+    due_date = _due_date_for(today.year, today.month, 10)
+
+    Transaction.objects.create(
+        account=account,
+        external_id="tx-streaming-unico",
+        description="Cobranca streaming",
+        category=SubscriptionCategory.STREAMING,
+        amount=30,
+        type=TransactionType.DEBIT,
+        booked_at=_booked_at(due_date),
+    )
+
+    _reconcile_subscriptions(user)
+
+    payments = SubscriptionPayment.objects.filter(
+        subscription__in=[sub_a, sub_b], due_date=due_date
+    )
+    paid = [p for p in payments if p.status == SubscriptionStatus.PAID]
+    assert len(paid) == 1, "a mesma transacao nao pode pagar as duas assinaturas"
+
+
+@pytest.mark.django_db
+def test_overdue_payment_becomes_paid_when_late_transaction_appears(subscription, user, account):
+    """Uma vez overdue, o pagamento so volta a paid se uma transacao aparecer
+    dentro da janela num sync seguinte -- a reconciliacao roda a cada sync."""
+    due_date = _previous_month_due_date(subscription.due_day)
+
+    _reconcile_subscriptions(user)
+    payment = SubscriptionPayment.objects.get(subscription=subscription, due_date=due_date)
+    assert payment.status == SubscriptionStatus.OVERDUE
+
+    tx = Transaction.objects.create(
+        account=account,
+        external_id="tx-netflix-atrasada",
+        description="Pagamento NETFLIX mensal",
+        amount=55,
+        type=TransactionType.DEBIT,
+        booked_at=_booked_at(due_date + timedelta(days=4)),
+    )
+
+    _reconcile_subscriptions(user)
+
+    payment.refresh_from_db()
+    assert payment.status == SubscriptionStatus.PAID
+    assert payment.matched_transaction_id == tx.id

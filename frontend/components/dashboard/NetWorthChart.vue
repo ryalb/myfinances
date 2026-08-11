@@ -30,11 +30,11 @@ const chartData = computed(() => {
           </linearGradient>
         </defs>
         <path
-          :d="`M0,100 ${chartData.map((d, i) => `L${(i / (chartData.length - 1)) * 100},${100 - d.value}`).join(' ')} L100,100 Z`"
+          :d="`M0,100 ${chartData.map((d, i) => `L${(i / Math.max(chartData.length - 1, 1)) * 100},${100 - d.value}`).join(' ')} L100,100 Z`"
           fill="url(#netWorthGrad)"
         />
         <polyline
-          :points="chartData.map((d, i) => `${(i / (chartData.length - 1)) * 100},${100 - d.value}`).join(' ')"
+          :points="chartData.map((d, i) => `${(i / Math.max(chartData.length - 1, 1)) * 100},${100 - d.value}`).join(' ')"
           fill="none"
           stroke="#8b7355"
           stroke-width="0.8"

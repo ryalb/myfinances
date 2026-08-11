@@ -5,6 +5,8 @@ export type ReportSource = {
 }
 
 export type PortfolioReport = {
+  id: number
+  query: string
   summary: string
   projections: string
   strengths: string[]
@@ -13,6 +15,9 @@ export type PortfolioReport = {
   suggestions: string[]
   disclaimer: string
   sources: ReportSource[]
+  created_at: string
+  // Só vem na resposta de geração (POST): estatística da indexação daquela
+  // chamada, não faz parte do relatório persistido.
   index?: { indexed: number; skipped: number; removed: number }
 }
 
@@ -58,5 +63,11 @@ export function useAiReport() {
     }
   }
 
-  return { report, loading, error, generate }
+  // Mostra um relatório já persistido (histórico) sem chamar a LLM de novo.
+  const view = (saved: PortfolioReport) => {
+    error.value = ''
+    report.value = saved
+  }
+
+  return { report, loading, error, generate, view }
 }

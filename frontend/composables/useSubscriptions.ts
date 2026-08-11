@@ -1,9 +1,18 @@
+export type MatchedTransaction = {
+  id: number
+  description: string
+  amount: number
+  booked_at: string
+  account_name: string | null
+}
+
 export type SubscriptionPayment = {
   id: number
   due_date: string
   paid_date: string | null
   status: string
   paid_amount: number | null
+  matched_transaction: MatchedTransaction | null
 }
 
 export type Subscription = {

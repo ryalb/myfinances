@@ -9,18 +9,14 @@ PYTHONPATH = "backend"
 
 [tasks.setup]
 description = "Install backend and frontend dependencies"
-run = [
-  "cd backend && docker compose up -d --force-recreate --remove-orphans",
-  "cd backend && uv sync --group dev",
-  "cd frontend && bun install",
-]
+run = "sh scripts/setup.sh"
 
 [tasks.backend-dev]
 description = "Run Django API via Daphne (ASGI/WebSocket)"
 # `ngrok` NAO pode entrar aqui: `depends` espera a task terminar, e
 # `ngrok start --all` nunca termina -- o daphne nunca subiria.
 # Rode o tunel em paralelo: `mise run backend-dev ::: ngrok`
-depends = ["backend-migrate", "kill-port 8000"]
+depends = ["kill-port 8000"]
 run = "cd backend && uv run daphne config.asgi:application --port 8000"
 # output = "interleave"
 env = { FORCE_COLOR = "1", RichTraceback_color_system = "true" }

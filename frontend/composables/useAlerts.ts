@@ -17,30 +17,15 @@ export const ALERT_STYLES: Record<Alert['severity'], { chip: string; icon: strin
 }
 
 export function useAlerts() {
-  const config = useRuntimeConfig()
+  const { graphql } = useApi()
 
   // `useAsyncData` e não fetch manual: `useRealtimeSync` chama `refreshNuxtData()`
   // a cada evento de sync, então os alertas se atualizam pelo WebSocket sem polling.
   const { data: alerts, refresh } = useAsyncData<Alert[]>(
     'alerts',
     async () => {
-      try {
-        const res = await $fetch<{ data?: { alerts?: Alert[] } }>(
-          `${config.public.graphqlEndpoint}`,
-          {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${useCookie<string | null>('access_token').value}`,
-              'Content-Type': 'application/json',
-            },
-            body: { query: ALERTS_QUERY },
-          },
-        )
-        return res?.data?.alerts ?? []
-      } catch {
-        // Falha aqui não pode derrubar o cabeçalho: o sino simplesmente não aparece.
-        return []
-      }
+      const res = await graphql<{ data?: { alerts?: Alert[] } }>(ALERTS_QUERY)
+      return res?.data?.alerts ?? []
     },
     { default: () => [] },
   )

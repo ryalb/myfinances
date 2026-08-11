@@ -100,7 +100,10 @@ def test_inactive_rule_is_ignored(user):
         "UBER TRIP", provider_category="Travel", tx_type=TransactionType.DEBIT, user=user
     )
 
-    assert category == "Travel"
+    # `provider_category` e traduzida para pt-BR (ver normalize_transaction_category):
+    # "Travel" -> "Viagens". A regra inativa e ignorada; o teste verifica isso, nao a
+    # lingua do fallback.
+    assert category == "Viagens"
 
 
 @pytest.mark.django_db

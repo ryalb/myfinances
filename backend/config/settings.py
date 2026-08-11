@@ -98,6 +98,24 @@ PUBLIC_TUNNEL_ALLOWED_PATHS = (
 # pessoa com acesso a API crie uma conta.
 ALLOW_PUBLIC_REGISTRATION = os.getenv("DJANGO_ALLOW_PUBLIC_REGISTRATION", "False").lower() == "true"
 
+# Categorias da Pluggy (provider_category, comparadas em minusculo) que sao
+# dinheiro mudando de bolso do proprio usuario -- pagamento de fatura de cartao,
+# transferencia entre contas proprias -- e nao renda nem gasto real. Sem excluir
+# isso, o pagamento da fatura entra como receita no lado do cartao (a Pluggy manda
+# type=CREDIT ali) e/ou como despesa duplicada no lado da conta, alem do gasto ja
+# contado quando a compra foi feita no cartao.
+FINANCE_INTERNAL_TRANSFER_CATEGORIES = [
+    c.strip().lower()
+    for c in os.getenv(
+        "FINANCE_INTERNAL_TRANSFER_CATEGORIES",
+        "credit card payment,"
+        "same person transfer,same person transfer - cash,"
+        "same person transfer - pix,same person transfer - ted,"
+        "transfer - internal",
+    ).split(",")
+    if c.strip()
+]
+
 ROOT_URLCONF = "config.urls"
 
 TEMPLATES = [

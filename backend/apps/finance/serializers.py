@@ -8,10 +8,12 @@ from .models import (
     Connection,
     FinancialGoal,
     FinancialInstitution,
+    Identity,
     Investment,
     InvestmentPosition,
     NetWorthSnapshot,
     PensionPlan,
+    PortfolioReport,
     Subscription,
     SubscriptionPayment,
     SyncJob,
@@ -23,6 +25,22 @@ class FinancialInstitutionSerializer(serializers.ModelSerializer):
     class Meta:
         model = FinancialInstitution
         fields = ("id", "name", "provider_id", "logo_url")
+
+
+class IdentitySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Identity
+        fields = (
+            "id",
+            "full_name",
+            "document",
+            "document_type",
+            "birth_date",
+            "job_title",
+            "email",
+            "phone_number",
+            "address",
+        )
 
 
 class ConnectionSerializer(serializers.ModelSerializer):
@@ -44,6 +62,8 @@ class ConnectionSerializer(serializers.ModelSerializer):
 
 
 class AccountSerializer(serializers.ModelSerializer):
+    identity = serializers.SerializerMethodField()
+
     class Meta:
         model = Account
         fields = (
@@ -51,14 +71,23 @@ class AccountSerializer(serializers.ModelSerializer):
             "connection",
             "external_id",
             "name",
+            "number",
             "type",
             "currency",
             "balance",
             "available_balance",
+            "identity",
         )
+
+    def get_identity(self, obj):
+        identity = getattr(obj.connection, "identity", None)
+        return IdentitySerializer(identity).data if identity else None
 
 
 class TransactionSerializer(serializers.ModelSerializer):
+    account_name = serializers.SerializerMethodField()
+    institution_name = serializers.SerializerMethodField()
+
     class Meta:
         model = Transaction
         fields = (
@@ -72,8 +101,20 @@ class TransactionSerializer(serializers.ModelSerializer):
             "type",
             "category",
             "provider_category",
+            "is_internal_transfer",
             "booked_at",
+            "account_name",
+            "institution_name",
         )
+
+    def get_account_name(self, obj):
+        holder = obj.account or obj.card
+        return holder.name if holder else ""
+
+    def get_institution_name(self, obj):
+        holder = obj.account or obj.card
+        connection = holder.connection if holder else None
+        return connection.institution.name if connection else ""
 
 
 class NetWorthSnapshotSerializer(serializers.ModelSerializer):
@@ -98,6 +139,25 @@ class SyncJobSerializer(serializers.ModelSerializer):
             "error_message",
             "created_at",
         )
+
+
+class PortfolioReportSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PortfolioReport
+        fields = (
+            "id",
+            "query",
+            "summary",
+            "projections",
+            "strengths",
+            "weaknesses",
+            "adjustments",
+            "suggestions",
+            "disclaimer",
+            "sources",
+            "created_at",
+        )
+        read_only_fields = fields
 
 
 class FinancialSummarySerializer(serializers.Serializer):
@@ -205,6 +265,7 @@ class SubscriptionPaymentSerializer(serializers.ModelSerializer):
     subscription = UserScopedPrimaryKeyRelatedField(
         queryset=Subscription.objects.all(), user_path="user"
     )
+    matched_transaction = serializers.SerializerMethodField()
 
     class Meta:
         model = SubscriptionPayment
@@ -215,10 +276,23 @@ class SubscriptionPaymentSerializer(serializers.ModelSerializer):
             "paid_date",
             "status",
             "paid_amount",
+            "matched_transaction",
             "created_at",
             "updated_at",
         )
         read_only_fields = ("created_at", "updated_at")
+
+    def get_matched_transaction(self, obj):
+        tx = obj.matched_transaction
+        if not tx:
+            return None
+        return {
+            "id": tx.id,
+            "description": tx.description,
+            "amount": tx.amount,
+            "booked_at": tx.booked_at,
+            "account_name": tx.account.name if tx.account else (tx.card.name if tx.card else None),
+        }
 
 
 class SubscriptionSerializer(serializers.ModelSerializer):
@@ -321,15 +395,20 @@ class InvestmentPositionSerializer(serializers.ModelSerializer):
 
 
 class PensionPlanSerializer(serializers.ModelSerializer):
+    is_manual = serializers.SerializerMethodField()
+
     class Meta:
         model = PensionPlan
         fields = (
             "id",
-            "connection",
             "name",
             "provider",
             "balance",
+            "is_manual",
             "created_at",
             "updated_at",
         )
         read_only_fields = ("created_at", "updated_at")
+
+    def get_is_manual(self, obj):
+        return obj.connection_id is None

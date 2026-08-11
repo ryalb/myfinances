@@ -27,7 +27,12 @@ class SyncConsumer(AsyncJsonWebsocketConsumer):
                 logger.warning("WebSocket authentication failed")
 
         if self.user is None:
-            await self.close()
+            # O Daphne só entrega um close code customizado ao cliente se a
+            # conexão já foi aceita: fechar antes do accept() faz o handshake
+            # ser rejeitado com HTTP 403 genérico, e o navegador só vê code
+            # 1006 (abnormal closure) — o 4001 nunca chegaria no front.
+            await self.accept()
+            await self.close(code=4001)
             return
 
         self.group_name = f"user_{self.user.id}"

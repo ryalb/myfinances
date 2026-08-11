@@ -14,10 +14,16 @@ const { data: accounts } = await useFetch<
   {
     id: number
     name: string
+    number: string
     type: string
     currency: string
     balance: number
     available_balance: number
+    identity: {
+      full_name: string
+      document: string
+      document_type: string
+    } | null
   }[]
 >(`${config.public.apiBaseUrl}/accounts/`, { key: 'accounts-page', headers })
 
@@ -62,6 +68,11 @@ const uiStore = useUiStore()
             <span :class="['mt-1 inline-block rounded-full px-2 py-0.5 text-xs font-medium', typeColors[account.type] || typeColors.other]">
               {{ typeLabels[account.type] || account.type }}
             </span>
+            <p v-if="account.number" class="mt-1 text-xs text-sepia-400">Conta: {{ account.number }}</p>
+            <p v-if="account.identity?.full_name" class="mt-1 text-xs text-sepia-400">
+              Titular: {{ account.identity.full_name }}
+              <span v-if="account.identity.document">· {{ account.identity.document }}</span>
+            </p>
           </div>
           <p :class="['text-right text-lg font-bold text-sepia-900', uiStore.isFinancialValueBlurred ? 'blur-sm select-none' : '']">{{ formatBRL(account.available_balance || account.balance) }}</p>
         </div>

@@ -31,7 +31,7 @@ export function useApi() {
   const config = useRuntimeConfig()
   const token = useCookie<string | null>('access_token')
   const router = useRouter()
-  const { logout } = useAuth()
+  const { logout, refresh } = useAuth()
 
   const getHeaders = (): Record<string, string> => {
     const base: Record<string, string> = {}
@@ -50,11 +50,25 @@ export function useApi() {
     }
   }
 
+  // Um 401 quase sempre é o access token expirando no meio da sessão (vida
+  // curta de 5min) — não a sessão em si. Tenta renovar e refazer a chamada
+  // uma vez antes de deslogar; só desloga se o refresh token também falhar.
+  const isUnauthorized = (error: unknown) => (error as { status?: number })?.status === 401
+
   const get = async <T>(path: string): Promise<T | null> => {
     try {
       return await $fetch<T>(`${config.public.apiBaseUrl}${path}`, { headers: getHeaders() })
     } catch (error) {
-      if ((error as { status?: number }).status === 401) handleUnauthorized()
+      if (!isUnauthorized(error)) return null
+      if (await refresh()) {
+        try {
+          return await $fetch<T>(`${config.public.apiBaseUrl}${path}`, { headers: getHeaders() })
+        } catch {
+          handleUnauthorized()
+          return null
+        }
+      }
+      handleUnauthorized()
       return null
     }
   }
@@ -63,24 +77,63 @@ export function useApi() {
   // de validação faz o formulário parecer ter salvo: o chamador não tem como
   // distinguir sucesso de 400 e o usuário não recebe mensagem nenhuma.
   const write = async <T>(method: 'POST' | 'PATCH' | 'DELETE', path: string, body?: Record<string, unknown>): Promise<T | null> => {
-    try {
-      return await $fetch<T>(`${config.public.apiBaseUrl}${path}`, {
+    const attempt = () =>
+      $fetch<T>(`${config.public.apiBaseUrl}${path}`, {
         method,
         headers: body ? { ...getHeaders(), 'Content-Type': 'application/json' } : getHeaders(),
         body,
       })
+
+    try {
+      return await attempt()
     } catch (error) {
-      if ((error as { status?: number }).status === 401) {
-        handleUnauthorized()
-        return null
+      if (!isUnauthorized(error)) throw error
+      if (await refresh()) {
+        try {
+          return await attempt()
+        } catch (retryError) {
+          if (isUnauthorized(retryError)) {
+            handleUnauthorized()
+            return null
+          }
+          throw retryError
+        }
       }
-      throw error
+      handleUnauthorized()
+      return null
     }
   }
 
   const post = <T>(path: string, body: Record<string, unknown>) => write<T>('POST', path, body)
   const patch = <T>(path: string, body: Record<string, unknown>) => write<T>('PATCH', path, body)
   const del = <T>(path: string) => write<T>('DELETE', path)
+
+  // Mesma renovação de token dos endpoints REST, para as queries GraphQL que
+  // hoje montam o fetch na mão em cada composable.
+  const graphql = async <T>(query: string, variables?: Record<string, unknown>): Promise<T | null> => {
+    const attempt = () =>
+      $fetch<T>(config.public.graphqlEndpoint as string, {
+        method: 'POST',
+        headers: { ...getHeaders(), 'Content-Type': 'application/json' },
+        body: variables ? { query, variables } : { query },
+      })
+
+    try {
+      return await attempt()
+    } catch (error) {
+      if (!isUnauthorized(error)) return null
+      if (await refresh()) {
+        try {
+          return await attempt()
+        } catch {
+          handleUnauthorized()
+          return null
+        }
+      }
+      handleUnauthorized()
+      return null
+    }
+  }
 
   /**
    * Baixa um arquivo do backend.
@@ -105,5 +158,5 @@ export function useApi() {
     }
   }
 
-  return { get, post, patch, del, download, getHeaders }
+  return { get, post, patch, del, download, graphql, getHeaders }
 }

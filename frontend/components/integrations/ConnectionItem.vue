@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import Button from 'primevue/button'
 import { extractApiError } from '@/composables/useApi'
+import { formatIsoDateOnly, formatIsoDateTime } from '@/composables/useDateFormat'
 const props = defineProps<{
   connection: {
     id: number
@@ -17,6 +18,8 @@ const { post, del } = useApi()
 const syncing = ref(false)
 const removing = ref(false)
 const error = ref('')
+const lastSyncEvent = useSyncEvent()
+let syncTimeout: ReturnType<typeof setTimeout> | null = null
 
 const statusColors: Record<string, string> = {
   active: 'bg-emerald-100 text-emerald-700',
@@ -30,12 +33,33 @@ const sync = async () => {
   error.value = ''
   try {
     await post(`/connections/${props.connection.id}/sync/`, { kind: 'incremental' })
+    // O POST so enfileira o job no Celery; a sincronizacao real termina depois,
+    // avisada pelo evento `sync_event` no WebSocket. Sem o timeout, perder esse
+    // evento (WS caiu, reconectando) deixa o botao girando pra sempre.
+    if (syncTimeout) clearTimeout(syncTimeout)
+    syncTimeout = setTimeout(() => {
+      syncing.value = false
+    }, 60_000)
   } catch (e: unknown) {
-    error.value = extractApiError(e, 'Erro ao sincronizar a conexão.')
-  } finally {
     syncing.value = false
+    error.value = extractApiError(e, 'Erro ao sincronizar a conexão.')
   }
 }
+
+watch(lastSyncEvent, (event) => {
+  if (!event || event.connectionId !== props.connection.id) return
+  if (event.status === 'SUCCESS' || event.status === 'FAILED') {
+    if (syncTimeout) {
+      clearTimeout(syncTimeout)
+      syncTimeout = null
+    }
+    syncing.value = false
+  }
+})
+
+onUnmounted(() => {
+  if (syncTimeout) clearTimeout(syncTimeout)
+})
 
 const remove = async () => {
   if (!confirm('Tem certeza que deseja remover esta conexão?')) return
@@ -59,7 +83,7 @@ const remove = async () => {
     <div class="flex items-start justify-between">
       <div>
         <h4 class="font-semibold text-sepia-900">{{ props.connection.institution.name }}</h4>
-        <p class="mt-1 text-xs text-sepia-500">Conectado em {{ new Date(props.connection.created_at).toLocaleDateString('pt-BR') }}</p>
+        <p class="mt-1 text-xs text-sepia-500">Conectado em {{ formatIsoDateOnly(props.connection.created_at) }}</p>
       </div>
       <span :class="['rounded-full px-2 py-0.5 text-xs font-medium', statusColors[props.connection.status] || 'bg-sepia-100 text-sepia-600']">
         {{ props.connection.status }}
@@ -68,7 +92,7 @@ const remove = async () => {
 
     <!-- Last synced -->
     <div v-if="props.connection.last_synced_at" class="mt-3 text-xs text-sepia-500">
-      Última sincronização: {{ new Date(props.connection.last_synced_at).toLocaleString('pt-BR') }}
+      Última sincronização: {{ formatIsoDateTime(props.connection.last_synced_at) }}
     </div>
 
     <!-- Error message -->
@@ -83,9 +107,10 @@ const remove = async () => {
     <div class="mt-4 flex gap-2">
       <Button
         :disabled="syncing"
-        class="!rounded-lg !border !border-sepia-200 !bg-white !px-3 !py-1.5 !text-xs !font-medium !text-sepia-600 hover:!bg-sepia-50 disabled:!opacity-50"
+        class="!flex !items-center !gap-1.5 !rounded-lg !border !border-sepia-200 !bg-white !px-3 !py-1.5 !text-xs !font-medium !text-sepia-600 hover:!bg-sepia-50 disabled:!opacity-50"
         @click="sync"
       >
+        <Icon v-if="syncing" icon="mdi:loading" class="h-3.5 w-3.5 animate-spin" />
         {{ syncing ? 'Sincronizando...' : 'Sincronizar agora' }}
       </Button>
       <Button

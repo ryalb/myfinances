@@ -137,7 +137,7 @@ def test_pension_plans_are_scoped_to_the_user(user, other_user, connection, inst
     from apps.finance.models import Connection, ConnectionStatus
 
     PensionPlan.objects.create(
-        connection=connection, external_id="prev-1", name="PGBL", provider="Banco Teste"
+        connection=connection, user=user, external_id="prev-1", name="PGBL", provider="Banco Teste"
     )
     other_connection = Connection.objects.create(
         user=other_user,
@@ -146,7 +146,11 @@ def test_pension_plans_are_scoped_to_the_user(user, other_user, connection, inst
         status=ConnectionStatus.ACTIVE,
     )
     PensionPlan.objects.create(
-        connection=other_connection, external_id="prev-2", name="VGBL do invasor", provider="Outro"
+        connection=other_connection,
+        user=other_user,
+        external_id="prev-2",
+        name="VGBL do invasor",
+        provider="Outro",
     )
 
     data = execute("{ pensionPlans { name } }", user=user)

@@ -261,6 +261,7 @@ class Command(BaseCommand):
         for _ in range(random.randint(0, 2)):
             PensionPlan.objects.create(
                 connection=connection,
+                user=connection.user,
                 name=fake.word().capitalize() + " Prev",
                 provider=fake.company(),
                 balance=round(random.uniform(1000, 100000), 2),
