@@ -31,7 +31,10 @@ export function useAuth() {
   }
 
   const refresh = (): Promise<boolean> => {
-    if (!refreshToken.value) return Promise.resolve(false)
+    if (!refreshToken.value) {
+      logout()
+      return Promise.resolve(false)
+    }
     if (refreshPromise) return refreshPromise
 
     refreshPromise = (async () => {

@@ -115,3 +115,34 @@ def test_history_requires_authentication():
     response = APIClient().get(HISTORY_URL)
 
     assert response.status_code in (401, 403)
+
+
+@pytest.mark.django_db
+def test_deleting_a_report_removes_it(user):
+    report = PortfolioReport.objects.create(user=user, summary="para apagar")
+
+    response = _client(user).delete(f"{HISTORY_URL}{report.id}/")
+
+    assert response.status_code == 204
+    assert not PortfolioReport.objects.filter(id=report.id).exists()
+
+
+@pytest.mark.django_db
+def test_cannot_delete_another_users_report(user, other_user):
+    report = PortfolioReport.objects.create(user=other_user, summary="do outro")
+
+    response = _client(user).delete(f"{HISTORY_URL}{report.id}/")
+
+    # `get_queryset` ja filtra por `user`: fora do escopo, o objeto nem existe
+    # do ponto de vista do viewset, entao 404 e nao 403.
+    assert response.status_code == 404
+    assert PortfolioReport.objects.filter(id=report.id).exists()
+
+
+@pytest.mark.django_db
+def test_delete_requires_authentication(other_user):
+    report = PortfolioReport.objects.create(user=other_user, summary="qualquer")
+
+    response = APIClient().delete(f"{HISTORY_URL}{report.id}/")
+
+    assert response.status_code in (401, 403)

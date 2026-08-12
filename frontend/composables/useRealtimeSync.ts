@@ -12,7 +12,7 @@ export function useSyncEvent() {
 
 export function useRealtimeSync() {
   const config = useRuntimeConfig()
-  const { accessToken, refresh } = useAuth()
+  const { accessToken, refresh, logout } = useAuth()
   const lastSyncEvent = useSyncEvent()
   let ws: WebSocket | null = null
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
@@ -63,14 +63,19 @@ export function useRealtimeSync() {
     // Código 4001 = backend rejeitou o token (consumers.py). Reconectar direto
     // repetiria a mesma falha para sempre, já que accessToken.value não muda
     // sozinho — precisa renovar o access token primeiro. Se o refresh também
-    // falhar, `refresh()` desloga e o watch abaixo encerra o ciclo. O contador
-    // evita um loop apertado (refresh + reconnect sem espera) se o token novo
-    // continuar sendo rejeitado por outro motivo.
+    // falhar, `refresh()` desloga e o watch abaixo encerra o ciclo. Se o token
+    // novo continuar sendo rejeitado após 3 tentativas, desloga direto: cair
+    // no reconnectTimer aqui reconectaria com o mesmo token ruim para sempre,
+    // já que consecutiveAuthFailures só zera em onopen (nunca chega lá).
     ws.onclose = (event) => {
       ws = null
       if (!accessToken.value) return
 
-      if (event.code === 4001 && consecutiveAuthFailures < 3) {
+      if (event.code === 4001) {
+        if (consecutiveAuthFailures >= 3) {
+          logout()
+          return
+        }
         consecutiveAuthFailures += 1
         refresh().then((ok) => {
           if (ok) connect()

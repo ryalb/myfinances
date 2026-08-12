@@ -43,7 +43,7 @@ export function sourceLabel(source: ReportSource): string {
 }
 
 export function useAiReport() {
-  const { post } = useApi()
+  const { post, del } = useApi()
 
   const report = ref<PortfolioReport | null>(null)
   const loading = ref(false)
@@ -69,5 +69,10 @@ export function useAiReport() {
     report.value = saved
   }
 
-  return { report, loading, error, generate, view }
+  const remove = async (id: number) => {
+    await del(`/ai/portfolio-reports/${id}/`)
+    if (report.value?.id === id) report.value = null
+  }
+
+  return { report, loading, error, generate, view, remove }
 }

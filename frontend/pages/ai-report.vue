@@ -3,13 +3,15 @@ import Button from 'primevue/button'
 import { sourceLabel } from '@/composables/useAiReport'
 import type { PortfolioReport } from '@/composables/useAiReport'
 import { formatIsoDateTime } from '@/composables/useDateFormat'
+import { extractApiError } from '@/composables/useApi'
 
 definePageMeta({
   middleware: 'auth',
 })
 
-const { report, loading, error, generate, view } = useAiReport()
+const { report, loading, error, generate, view, remove } = useAiReport()
 const query = ref('')
+const removingId = ref<number | null>(null)
 
 // Histórico dos relatórios já gerados, persistidos no backend para consulta
 // posterior -- sem isso um refresh de página perdia a análise.
@@ -22,6 +24,22 @@ const {
 const onGenerate = async () => {
   await generate(query.value)
   await refreshHistory()
+}
+
+const onRemove = async (item: PortfolioReport) => {
+  if (!window.confirm(`Excluir o relatório de ${formatDate(item.created_at)}?`)) return
+  removingId.value = item.id
+  try {
+    await remove(item.id)
+    await refreshHistory()
+    // O relatório exibido acabou de ser apagado: mostra o próximo do histórico
+    // em vez de deixar a tela em branco.
+    if (!report.value && history.value.length) view(history.value[0])
+  } catch (e: unknown) {
+    error.value = extractApiError(e, 'Erro ao excluir o relatório.')
+  } finally {
+    removingId.value = null
+  }
 }
 
 // Ao entrar na tela, mostra o relatório mais recente em vez de ficar em branco:
@@ -119,18 +137,27 @@ const isEmpty = computed(
     <div v-if="history.length" class="rounded-xl border border-sepia-200 bg-white p-5 shadow-sm">
       <h3 class="mb-3 text-sm font-semibold text-sepia-900">Relatórios anteriores</h3>
       <ul class="flex flex-wrap gap-2">
-        <li v-for="item in history" :key="item.id">
+        <li
+          v-for="item in history"
+          :key="item.id"
+          :class="[
+            'flex items-center gap-1 rounded-full border pl-3 pr-1 text-xs transition',
+            report?.id === item.id
+              ? 'border-sepia-600 bg-sepia-600 text-white'
+              : 'border-sepia-200 bg-sepia-50 text-sepia-700 hover:border-sepia-400',
+          ]"
+        >
+          <button type="button" class="py-1" @click="view(item)">
+            {{ formatDate(item.created_at) }}
+          </button>
           <button
             type="button"
-            :class="[
-              'rounded-full border px-3 py-1 text-xs transition',
-              report?.id === item.id
-                ? 'border-sepia-600 bg-sepia-600 text-white'
-                : 'border-sepia-200 bg-sepia-50 text-sepia-700 hover:border-sepia-400',
-            ]"
-            @click="view(item)"
+            :disabled="removingId === item.id"
+            title="Excluir relatório"
+            class="rounded-full p-1 opacity-60 hover:opacity-100 disabled:opacity-30"
+            @click="onRemove(item)"
           >
-            {{ formatDate(item.created_at) }}
+            <Icon icon="mdi:close" class="h-3.5 w-3.5" />
           </button>
         </li>
       </ul>

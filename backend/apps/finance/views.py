@@ -9,7 +9,7 @@ from django.conf import settings
 from django.db.models import Prefetch, Q
 from django.http import StreamingHttpResponse
 from django.utils import timezone
-from rest_framework import permissions, viewsets
+from rest_framework import mixins, permissions, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
@@ -792,7 +792,14 @@ class PortfolioReportAPIView(APIView):
         return Response(data)
 
 
-class PortfolioReportViewSet(viewsets.ReadOnlyModelViewSet):
+class PortfolioReportViewSet(
+    mixins.ListModelMixin,
+    mixins.RetrieveModelMixin,
+    mixins.DestroyModelMixin,
+    viewsets.GenericViewSet,
+):
+    # Sem create/update: relatorios so nascem via `PortfolioReportAPIView.post`.
+    # Destroy entra para o usuario poder limpar o historico.
     serializer_class = PortfolioReportSerializer
     permission_classes = [permissions.IsAuthenticated]
     pagination_class = UnboundedCollectionPagination
