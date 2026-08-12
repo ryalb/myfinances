@@ -137,21 +137,21 @@ const runReapply = async () => {
       </div>
       <Button
         :disabled="reapplying || !rules?.length"
-        class="shrink-0 !rounded-lg !border !border-sepia-200 !bg-white !px-3 !py-2 !text-xs !font-medium !text-sepia-600 hover:!bg-sepia-50 disabled:!opacity-40"
+        class="shrink-0 !rounded-lg !bg-sepia-900 !px-3 !py-1.5 !text-xs !font-medium !text-white !whitespace-nowrap hover:!bg-sepia-950 disabled:!opacity-40"
         @click="runReapply"
       >
         {{ reapplying ? 'Reaplicando...' : 'Reaplicar ao histórico' }}
       </Button>
     </div>
 
-    <p v-if="error" class="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+    <p v-if="error" class="rounded-lg border border-vermelho-200 bg-vermelho-50 px-4 py-3 text-sm text-vermelho-700">
       {{ error }}
     </p>
-    <p v-if="notice" class="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+    <p v-if="notice" class="rounded-lg border border-azul-200 bg-azul-50 px-4 py-3 text-sm text-azul-700">
       {{ notice }}
     </p>
 
-    <div class="rounded-xl border border-sepia-200 bg-white p-5 shadow-sm">
+    <div class="rounded-lg border border-sepia-200 bg-white p-5 shadow-sm">
       <h3 class="mb-3 text-base font-semibold text-sepia-900">Nova regra</h3>
       <div class="grid gap-3 sm:grid-cols-[2fr_2fr_1fr_auto] sm:items-end">
         <div>
@@ -185,7 +185,7 @@ const runReapply = async () => {
         </div>
         <Button
           :disabled="saving"
-          class="!rounded-lg !bg-sepia-600 !px-4 !py-2 !text-sm !font-medium !text-white hover:!bg-sepia-700 disabled:!opacity-50"
+          class="!rounded-lg !bg-sepia-900 !px-4 !py-2 !text-sm !font-medium !text-white !whitespace-nowrap hover:!bg-sepia-950 disabled:!opacity-50"
           @click="submit"
         >
           {{ saving ? 'Salvando...' : 'Adicionar' }}
@@ -205,7 +205,7 @@ const runReapply = async () => {
       </p>
     </div>
 
-    <div v-else class="overflow-hidden rounded-xl border border-sepia-200 bg-white shadow-sm">
+    <div v-else class="overflow-hidden rounded-lg border border-sepia-200 bg-white shadow-sm">
       <table class="w-full text-sm">
         <thead class="border-b border-sepia-200 bg-sepia-50">
           <tr>
@@ -249,7 +249,7 @@ const runReapply = async () => {
                 <span
                   :class="[
                     'inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium',
-                    rule.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-sepia-100 text-sepia-600',
+                    rule.is_active ? 'bg-azul-100 text-azul-700' : 'bg-sepia-100 text-sepia-600',
                   ]"
                 >
                   {{ rule.is_active ? 'Ativa' : 'Inativa' }}
@@ -262,7 +262,7 @@ const runReapply = async () => {
                     rounded
                     :disabled="busyRule === rule.id"
                     title="Salvar"
-                    class="!text-emerald-600 hover:!text-emerald-700"
+                    class="!text-azul-600 hover:!text-azul-700"
                     @click="saveEdit(rule)"
                   >
                     <Icon icon="mdi:check" class="h-5 w-5" />
@@ -292,7 +292,7 @@ const runReapply = async () => {
                 <span
                   :class="[
                     'inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium',
-                    rule.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-sepia-100 text-sepia-600',
+                    rule.is_active ? 'bg-azul-100 text-azul-700' : 'bg-sepia-100 text-sepia-600',
                   ]"
                 >
                   {{ rule.is_active ? 'Ativa' : 'Inativa' }}
@@ -325,7 +325,7 @@ const runReapply = async () => {
                     rounded
                     :disabled="busyRule === rule.id"
                     title="Excluir"
-                    class="!text-sepia-400 hover:!text-rose-600"
+                    class="!text-sepia-400 hover:!text-vermelho-600"
                     @click="remove(rule)"
                   >
                     <Icon icon="mdi:trash-can-outline" class="h-5 w-5" />

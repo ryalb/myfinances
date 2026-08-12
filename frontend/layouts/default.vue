@@ -15,11 +15,11 @@ const _handleLogout = () => {
 </script>
 
 <template>
-  <div class="min-h-screen xl:flex bg-sepia-50 text-sepia-900">
+  <div class="min-h-screen xl:flex bg-sepia-950">
     <LayoutAppSidebar />
     <LayoutBackdrop />
     <div
-      class="flex-1 transition-all duration-300 ease-in-out"
+      class="flex-1 min-h-screen bg-sepia-50 text-sepia-900 transition-all duration-300 ease-in-out"
       :class="[isExpanded || isHovered ? 'lg:ml-[290px]' : 'lg:ml-[90px]']"
     >
       <LayoutAppHeader />

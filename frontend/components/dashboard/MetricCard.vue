@@ -5,33 +5,25 @@ const props = defineProps<{
   label: string
   value: string
   sublabel?: string
-  icon?: string
-  color?: string
+  tone?: 'azul' | 'vermelho' | 'amber' | 'neutral'
 }>()
 
 const uiStore = useUiStore()
 
-const colors: Record<string, string> = {
-  emerald: 'text-emerald-600 bg-emerald-50',
-  blue: 'text-sepia-600 bg-sepia-50',
-  amber: 'text-amber-600 bg-amber-50',
-  rose: 'text-rose-600 bg-rose-50',
-  violet: 'text-sepia-600 bg-sepia-50',
-  slate: 'text-sepia-600 bg-sepia-50',
+const toneClass: Record<string, string> = {
+  azul: 'text-azul-700',
+  vermelho: 'text-vermelho-700',
+  amber: 'text-amber-700',
+  neutral: 'text-sepia-900',
 }
 
-const colorClass = colors[props.color || 'slate']
+const blur = computed(() => (uiStore.isFinancialValueBlurred ? 'blur-sm select-none' : ''))
 </script>
 
 <template>
-  <article class="rounded-xl border border-sepia-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md">
-    <div class="flex items-center justify-between">
-      <p class="text-sm font-medium text-sepia-500">{{ label }}</p>
-      <span v-if="icon" :class="['inline-flex items-center justify-center rounded-lg p-2', colorClass]">
-        <Icon :icon="icon" class="h-5 w-5" />
-      </span>
-    </div>
-    <p :class="['mt-3 text-2xl font-bold text-sepia-900', uiStore.isFinancialValueBlurred ? 'blur-sm select-none' : '']">{{ value }}</p>
-    <p :class="['mt-1 text-xs text-sepia-400', uiStore.isFinancialValueBlurred ? 'blur-sm select-none' : '']">{{ sublabel }}</p>
+  <article class="rounded-lg border border-sepia-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md">
+    <p class="text-xs font-medium uppercase tracking-wide text-sepia-400">{{ label }}</p>
+    <p :class="['mt-2 font-mono text-2xl font-bold', toneClass[props.tone || 'neutral'], blur]">{{ value }}</p>
+    <p :class="['mt-1 text-xs text-sepia-500', blur]">{{ sublabel }}</p>
   </article>
 </template>

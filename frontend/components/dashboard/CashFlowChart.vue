@@ -28,16 +28,16 @@ const chartData = computed(() => {
 </script>
 
 <template>
-  <div class="rounded-xl border border-sepia-200 bg-white p-5 shadow-sm">
+  <div class="rounded-lg border border-sepia-200 bg-white p-5 shadow-sm">
     <div class="mb-1 flex flex-wrap items-baseline justify-between gap-2">
-      <h3 class="text-lg font-semibold text-sepia-900">Fluxo de Caixa — Últimos 12 Meses</h3>
+      <h3 class="text-base font-semibold text-sepia-900">Fluxo de Caixa — Últimos 12 Meses</h3>
       <div class="flex gap-4 text-xs">
         <span class="flex items-center gap-1.5">
-          <span class="h-2.5 w-2.5 rounded-full bg-emerald-500" />
+          <span class="h-2.5 w-2.5 rounded-full bg-azul-600" />
           Receitas
         </span>
         <span class="flex items-center gap-1.5">
-          <span class="h-2.5 w-2.5 rounded-full bg-rose-500" />
+          <span class="h-2.5 w-2.5 rounded-full bg-vermelho-600" />
           Despesas
         </span>
       </div>
@@ -50,17 +50,17 @@ const chartData = computed(() => {
         :key="idx"
         class="flex min-w-0 flex-1 flex-col items-center gap-1"
       >
-        <span class="text-[11px] leading-none text-sepia-500">{{ item.savingsRate.toFixed(0) }}%</span>
+        <span class="font-mono text-[11px] leading-none text-sepia-500">{{ item.savingsRate.toFixed(0) }}%</span>
 
         <!-- Área de plotagem: as duas barras crescem da mesma linha de base -->
         <div class="flex w-full flex-1 items-end justify-center gap-0.5">
           <div
-            class="w-1/2 rounded-t-sm bg-emerald-500 transition-all"
+            class="w-1/2 rounded-t-sm bg-azul-600 transition-all"
             :style="{ height: `${item.incomeHeight}%` }"
             :title="`${item.month} · Receita: ${formatBRL(item.rawIncome)}`"
           />
           <div
-            class="w-1/2 rounded-t-sm bg-rose-500 transition-all"
+            class="w-1/2 rounded-t-sm bg-vermelho-600 transition-all"
             :style="{ height: `${item.expensesHeight}%` }"
             :title="`${item.month} · Despesa: ${formatBRL(item.rawExpenses)}`"
           />

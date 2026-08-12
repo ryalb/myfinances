@@ -17,6 +17,7 @@
     "@nuxtjs/tailwindcss": "^6.12.1",
     "@pinia/nuxt": "^0.5.5",
     "@primeuix/themes": "^3.0.0",
+    "chart.js": "^4.5.1",
     "graphql": "^16.9.0",
     "nuxt": "^3.13.2",
     "pinia": "^2.1.7",

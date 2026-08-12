@@ -106,7 +106,7 @@ const handleSubmit = async () => {
     <Transition name="fade">
       <div v-if="open" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
         <Transition name="slide">
-          <div v-if="open" class="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
+          <div v-if="open" class="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
             <div class="mb-4 flex items-center justify-between">
               <h3 class="text-lg font-semibold text-sepia-900">
                 {{ isEditing ? 'Editar assinatura' : 'Nova assinatura' }}
@@ -185,15 +185,15 @@ const handleSubmit = async () => {
                 Assinatura ativa
               </label>
 
-              <p v-if="error" class="text-sm text-rose-600">{{ error }}</p>
+              <p v-if="error" class="text-sm text-vermelho-600">{{ error }}</p>
 
               <div class="flex justify-end gap-2">
-                <Button class="!rounded-lg !bg-transparent !px-4 !py-2 !text-sm !font-medium !text-sepia-600 hover:!bg-sepia-100" @click="close">
+                <Button class="!rounded-lg !bg-sepia-900 !px-4 !py-2 !text-sm !font-medium !text-white !whitespace-nowrap hover:!bg-sepia-950" @click="close">
                   Cancelar
                 </Button>
                 <Button
                   :disabled="loading"
-                  class="!rounded-lg !bg-sepia-600 !px-4 !py-2 !text-sm !font-medium !text-white hover:!bg-sepia-700 disabled:!opacity-50"
+                  class="!rounded-lg !bg-sepia-900 !px-4 !py-2 !text-sm !font-medium !text-white !whitespace-nowrap hover:!bg-sepia-950 disabled:!opacity-50"
                   @click="handleSubmit"
                 >
                   {{ loading ? 'Salvando...' : 'Salvar' }}

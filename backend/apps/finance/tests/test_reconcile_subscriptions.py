@@ -9,6 +9,7 @@ from datetime import timedelta
 
 import pytest
 from django.utils import timezone
+from rest_framework.test import APIClient
 
 from apps.finance.models import (
     Account,
@@ -21,6 +22,8 @@ from apps.finance.models import (
     TransactionType,
 )
 from apps.finance.tasks import _due_date_for, _reconcile_subscriptions
+
+SUBSCRIPTIONS_URL = "/api/v1/subscriptions/"
 
 
 def _booked_at(day):
@@ -46,6 +49,13 @@ def subscription(db, user, connection):
     )
 
 
+@pytest.fixture
+def api(user):
+    client = APIClient()
+    client.force_authenticate(user)
+    return client
+
+
 @pytest.mark.django_db
 def test_creates_one_payment_per_month_in_the_window(subscription, user):
     _reconcile_subscriptions(user)
@@ -60,6 +70,30 @@ def test_is_idempotent_across_runs(subscription, user):
     _reconcile_subscriptions(user)
 
     assert SubscriptionPayment.objects.filter(subscription=subscription).count() == 10
+
+
+@pytest.mark.django_db
+def test_months_back_extends_the_backfill_window(subscription, user, account):
+    """Uma assinatura recem-cadastrada usa `months_back` maior para casar com
+    transacoes antigas que a janela padrao (-3 meses) nunca alcancaria."""
+    today = timezone.localdate()
+    old_due_date = _due_date_for(today.year, today.month, subscription.due_day) - timedelta(
+        days=300
+    )
+    Transaction.objects.create(
+        account=account,
+        external_id="tx-netflix-antiga",
+        description="Pagamento NETFLIX mensal",
+        amount=55,
+        type=TransactionType.DEBIT,
+        booked_at=_booked_at(old_due_date),
+    )
+
+    _reconcile_subscriptions(user, months_back=12)
+
+    payment = SubscriptionPayment.objects.get(subscription=subscription, due_date=old_due_date)
+    assert payment.status == SubscriptionStatus.PAID
+    assert payment.matched_transaction_id is not None
 
 
 @pytest.mark.django_db
@@ -94,6 +128,41 @@ def test_matches_transaction_by_name_and_marks_paid(subscription, user, account)
     assert payment.status == SubscriptionStatus.PAID
     assert payment.paid_date == due_date
     assert payment.paid_amount == tx.amount
+
+
+@pytest.mark.django_db
+def test_matches_transaction_when_description_omits_a_space(user, connection, account):
+    """O banco as vezes junta duas palavras do nome do comerciante -- "Google
+    Youtube Premium" cadastrado pelo usuario chega como "Google Youtubepremium"
+    na transacao (sem o espaco). String crua nunca casava por essa diferenca, e
+    a categoria tambem nao ajuda (a assinatura usa "streaming", o extrato vem
+    com "Internet" ou "Servicos digitais")."""
+    sub = Subscription.objects.create(
+        user=user,
+        connection=connection,
+        name="Google Youtube Premium",
+        category=SubscriptionCategory.STREAMING,
+        amount="53.90",
+        due_day=20,
+    )
+    today = timezone.localdate()
+    due_date = _due_date_for(today.year, today.month, sub.due_day)
+
+    tx = Transaction.objects.create(
+        account=account,
+        external_id="tx-youtube-premium",
+        description="Google Youtubepremium",
+        category="Internet",
+        amount="53.90",
+        type=TransactionType.DEBIT,
+        booked_at=_booked_at(due_date),
+    )
+
+    _reconcile_subscriptions(user)
+
+    payment = SubscriptionPayment.objects.get(subscription=sub, due_date=due_date)
+    assert payment.status == SubscriptionStatus.PAID
+    assert payment.matched_transaction_id == tx.id
 
 
 @pytest.mark.django_db
@@ -421,3 +490,34 @@ def test_overdue_payment_becomes_paid_when_late_transaction_appears(subscription
     payment.refresh_from_db()
     assert payment.status == SubscriptionStatus.PAID
     assert payment.matched_transaction_id == tx.id
+
+
+@pytest.mark.django_db
+def test_creating_a_subscription_via_api_backfills_matching_history(api, user, account):
+    """Sem reconciliar na criacao, a assinatura so ganhava historico no proximo
+    sync Pluggy ou no beat diario -- o usuario cadastra e ve "sem historico"
+    mesmo com meses de cobrancas que ja deveriam casar (ex.: Spotify cobrado
+    todo mes ha quase um ano antes do usuario cadastrar a assinatura)."""
+    today = timezone.localdate()
+    old_due_date = _due_date_for(today.year, today.month, 11) - timedelta(days=180)
+    Transaction.objects.create(
+        account=account,
+        external_id="tx-spotify-antiga",
+        description="Dm*Spotify",
+        amount="40.90",
+        type=TransactionType.DEBIT,
+        booked_at=_booked_at(old_due_date),
+    )
+
+    response = api.post(
+        SUBSCRIPTIONS_URL,
+        {"name": "Spotify", "category": "streaming", "amount": "40.90", "due_day": 11},
+        format="json",
+    )
+
+    assert response.status_code == 201, response.data
+    payment = SubscriptionPayment.objects.get(
+        subscription_id=response.data["id"], due_date=old_due_date
+    )
+    assert payment.status == SubscriptionStatus.PAID
+    assert payment.matched_transaction_id is not None

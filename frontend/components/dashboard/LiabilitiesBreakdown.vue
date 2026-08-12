@@ -7,15 +7,15 @@ const props = defineProps<{
 
 const items = computed(() => [
   { label: 'Cartões de crédito', value: props.creditCards, color: 'bg-amber-500' },
-  { label: 'Outras dívidas', value: props.otherDebts, color: 'bg-rose-500' },
+  { label: 'Outras dívidas', value: props.otherDebts, color: 'bg-vermelho-600' },
 ].filter((i) => i.value > 0))
 
 const total = computed(() => items.value.reduce((sum, i) => sum + Math.abs(i.value), 0))
 </script>
 
 <template>
-  <div class="rounded-xl border border-sepia-200 bg-white p-5 shadow-sm">
-    <h3 class="mb-4 text-lg font-semibold text-sepia-900">Passivos</h3>
+  <div class="rounded-lg border border-sepia-200 bg-white p-5 shadow-sm">
+    <h3 class="mb-3 text-base font-semibold text-sepia-900">Passivos</h3>
 
     <div v-if="items.length" class="mb-4 flex h-6 w-full overflow-hidden rounded-full">
       <div
@@ -37,7 +37,7 @@ const total = computed(() => items.value.reduce((sum, i) => sum + Math.abs(i.val
           <span :class="[item.color, 'block h-3 w-3 rounded-full']" />
           <span class="text-sepia-600">{{ item.label }}</span>
         </span>
-        <span class="font-medium text-sepia-900">
+        <span class="font-mono font-medium text-vermelho-700">
            {{ formatBRL(Math.abs(item.value)) }}
           <span v-if="total > 0" class="text-sepia-400">({{ ((Math.abs(item.value) / total) * 100).toFixed(1) }}%)</span>
         </span>

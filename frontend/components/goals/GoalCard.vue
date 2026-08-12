@@ -17,7 +17,7 @@ defineProps<{
 
 const statusColors: Record<string, string> = {
   active: 'bg-sepia-100 text-sepia-700',
-  achieved: 'bg-emerald-100 text-emerald-700',
+  achieved: 'bg-azul-100 text-azul-700',
   paused: 'bg-sepia-100 text-sepia-600',
 }
 
@@ -25,15 +25,15 @@ const uiStore = useUiStore()
 </script>
 
 <template>
-  <div class="rounded-xl border border-sepia-200 bg-white p-5 shadow-sm">
+  <div class="rounded-lg border border-sepia-200 bg-white p-5 shadow-sm">
     <div class="flex items-start justify-between">
       <div>
-        <h4 class="font-semibold text-sepia-900">{{ goal.name }}</h4>
+        <h3 class="font-semibold text-sepia-900">{{ goal.name }}</h3>
         <span :class="['mt-1 inline-block rounded-full px-2 py-0.5 text-xs font-medium', statusColors[goal.status] || 'bg-sepia-100 text-sepia-600']">
           {{ goal.status }}
         </span>
       </div>
-      <p :class="['text-right text-sm text-sepia-500', uiStore.isFinancialValueBlurred ? 'blur-sm select-none' : '']">
+      <p :class="['text-right font-mono text-sm text-sepia-500', uiStore.isFinancialValueBlurred ? 'blur-sm select-none' : '']">
         {{ formatBRL(goal.current_amount) }} / {{ formatBRL(goal.target_amount) }}
       </p>
     </div>

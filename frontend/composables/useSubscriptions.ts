@@ -69,6 +69,11 @@ export function useSubscriptions() {
     await refresh()
   }
 
+  const reconcileSubscriptions = async () => {
+    await post('/subscriptions/reconcile/', {})
+    await refresh()
+  }
+
   /** Marca o pagamento como pago. `amount` ausente cai no valor esperado da
    * assinatura, que é o caso comum de marcação manual. */
   const markPaid = async (paymentId: number, options: { amount?: number; paidDate?: string } = {}) => {
@@ -97,6 +102,7 @@ export function useSubscriptions() {
     createSubscription,
     updateSubscription,
     deleteSubscription,
+    reconcileSubscriptions,
     markPaid,
     markPending,
   }

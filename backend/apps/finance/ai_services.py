@@ -60,6 +60,11 @@ REPORT_DISCLAIMER = (
 REPORT_TEXT_FIELDS = ("summary", "projections")
 REPORT_LIST_FIELDS = ("strengths", "weaknesses", "adjustments", "suggestions")
 
+# Mesmo contrato, para a narracao do simulador de futuro financeiro -- os numeros
+# em si vem de `projections.build_future_projection`, a LLM so explica.
+PROJECTION_TEXT_FIELDS = ("narrative",)
+PROJECTION_LIST_FIELDS = ("leverage_explanation", "goal_commentary")
+
 # Hosts considerados locais. `ollama` e o nome do servico no docker-compose.
 LOCAL_INFERENCE_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "0.0.0.0", "ollama"})
 
@@ -158,6 +163,19 @@ def normalize_report(raw) -> dict:
     # Por ultimo: o disclaimer nao e negociavel pelo modelo.
     report["disclaimer"] = REPORT_DISCLAIMER
     return report
+
+
+def normalize_projection_narrative(raw) -> dict:
+    """Mesma normalizacao de `normalize_report`, para o contrato da narracao do
+    simulador de futuro financeiro (chaves e formato diferentes)."""
+    source = raw if isinstance(raw, dict) else {}
+    narrative: dict[str, object] = {}
+    for key in PROJECTION_TEXT_FIELDS:
+        narrative[key] = _as_text(source.get(key))
+    for key in PROJECTION_LIST_FIELDS:
+        narrative[key] = _as_list(source.get(key))
+    narrative["disclaimer"] = REPORT_DISCLAIMER
+    return narrative
 
 
 @dataclass(frozen=True)
@@ -468,6 +486,68 @@ def _build_goals_document(user) -> Document | None:
     )
 
 
+_SCENARIO_LABELS = {"conservative": "Conservador", "base": "Base", "aggressive": "Agressivo"}
+
+
+def _render_projection_lines(data: dict) -> list[str]:
+    """Linhas em pt-BR da simulacao de futuro financeiro.
+
+    Reaproveitada pelo documento indexavel (`_build_future_projection_document`) e
+    pelo prompt da narracao (`LLMService.generate_future_projection_narrative`): os
+    dois precisam descrever os mesmos numeros, um indexado e o outro direto no
+    prompt. `data` e a forma ja serializada (float/isoformat) de
+    `projections.build_future_projection`, nunca o dict com Decimal/date cru.
+    """
+    lines = [
+        f"Patrimonio atual: {_format_amount(data['current_net_worth'])}",
+        f"Aporte mensal medio (ultimos 3 meses): {_format_amount(data['monthly_contribution'])}",
+        "",
+        "## Cenarios (patrimonio projetado por horizonte)",
+    ]
+    for name, series in data["scenarios"].items():
+        label = _SCENARIO_LABELS.get(name, name)
+        parts = ", ".join(f"{years} anos: {_format_amount(value)}" for years, value in series.items())
+        lines.append(f"- {label}: {parts}")
+
+    lines.append("")
+    lines.append("## Cenario de estresse (choque de mercado + hiato de renda)")
+    parts = ", ".join(f"{years} anos: {_format_amount(value)}" for years, value in data["stress"].items())
+    lines.append(f"- {parts}")
+
+    if data["leverage_points"]:
+        lines.append("")
+        lines.append("## Pontos de alavancagem (impacto em 20 anos)")
+        for point in data["leverage_points"]:
+            lines.append(f"- {point['label']}: {_format_amount(point['impact'])} de diferenca")
+
+    if data["goals"]:
+        lines.append("")
+        lines.append("## Viabilidade de metas com data-alvo")
+        for goal in data["goals"]:
+            status = "no caminho" if goal["on_track"] else "fora do caminho"
+            lines.append(
+                f"- {goal['name']} (alvo {_format_amount(goal['target_amount'])} em "
+                f"{goal['target_date']}): {status}, falta cobrir "
+                f"{_format_amount(goal['shortfall'])}"
+            )
+    return lines
+
+
+def _build_future_projection_document(user) -> Document | None:
+    from .projections import build_future_projection, serialize_future_projection
+
+    data = serialize_future_projection(build_future_projection(user))
+    if not data["scenarios"]:
+        return None
+    lines = ["# Simulacao de futuro financeiro", *_render_projection_lines(data)]
+    return Document(
+        source_type="future_projection",
+        source_id=str(user.pk),
+        content="\n".join(lines),
+        metadata={"horizons": data["horizons"]},
+    )
+
+
 def _build_subscriptions_document(user) -> Document | None:
     overview = build_subscription_overview(user)
     if not overview["active_count"]:
@@ -685,6 +765,7 @@ def build_user_documents(user) -> list[Document]:
         _build_pension_document,
         _build_identity_document,
         _build_goals_document,
+        _build_future_projection_document,
         _build_subscriptions_document,
         _build_rules_document,
         _build_sync_history_document,
@@ -883,6 +964,28 @@ class RAGService:
                 context.append(item)
         return context
 
+    def retrieve_future_projection_context(self, user) -> list[dict]:
+        """Contexto para a narracao do simulador de futuro financeiro.
+
+        Sem busca por similaridade: este relatorio nao tem campo de busca livre
+        como o de portfolio, so narra numeros ja calculados -- o resumo
+        patrimonial, a propria simulacao e as metas bastam como contexto
+        qualitativo de apoio.
+        """
+        anchor_types = (SUMMARY_SOURCE_TYPE, "future_projection", "goals")
+        context = []
+        for source_type in anchor_types:
+            anchor = list(
+                Embedding.objects.filter(
+                    chunk__user=user,
+                    chunk__status=DocumentChunkStatus.INDEXED,
+                    chunk__source_type=source_type,
+                ).select_related("chunk")[:1]
+            )
+            if anchor:
+                context.append({"chunk": anchor[0].chunk, "similarity": 1.0})
+        return context
+
 
 class LLMService:
     def __init__(self) -> None:
@@ -959,3 +1062,76 @@ class LLMService:
             if item.get("chunk")
         ]
         return report
+
+    def generate_future_projection_narrative(
+        self, context_chunks: list[dict], projection_data: dict
+    ) -> dict:
+        """Narra em pt-BR uma simulacao ja calculada por `projections.py`.
+
+        `projection_data` e a forma serializada (float/isoformat) do payload --
+        os numeros entram no prompt diretamente, nao so via chunk indexado, para a
+        narracao nunca depender de o dominio `future_projection` ja ter sido
+        (re)indexado a tempo.
+        """
+        context_text = "\n\n".join(
+            f"[Fonte: {item['chunk'].source_type}/{item['chunk'].source_id}]\n"
+            f"{item['chunk'].content}"
+            for item in context_chunks
+            if item.get("chunk")
+        )
+        projection_text = "\n".join(_render_projection_lines(projection_data))
+
+        prompt = (
+            "Você é um planejador financeiro especializado em independência financeira "
+            "no Brasil. Os números da simulação abaixo já foram calculados por código "
+            "determinístico; sua tarefa é apenas explicá-los em linguagem natural, nunca "
+            "recalculá-los ou inventar valores diferentes dos fornecidos.\n\n"
+            "Regras obrigatórias:\n"
+            "- Use apenas os números da simulação e do contexto abaixo; não invente valores.\n"
+            "- Formate valores monetários no padrão brasileiro: separador de milhar '.', "
+            "separador decimal ',' e prefixo 'R$ ' (ex.: R$ 1.234,56). Nunca use o padrão "
+            "americano (1,234.56).\n"
+            "- Cada item das listas deve ser uma frase única em texto simples (string), "
+            "nunca um objeto ou par chave/valor.\n\n"
+            f"Simulação:\n{projection_text}\n\n"
+            f"Contexto adicional:\n{context_text}\n\n"
+            "Retorne um JSON com as chaves:\n"
+            "- narrative: texto corrido (string) explicando os cenários (conservador, base, "
+            "agressivo e o de estresse) e o que eles significam para a vida financeira do "
+            "usuário\n"
+            "- leverage_explanation: lista de frases explicando por que cada ponto de "
+            "alavancagem listado na simulação tem esse impacto no resultado de 20 anos\n"
+            "- goal_commentary: lista de frases comentando a viabilidade de cada meta com "
+            "data-alvo listada na simulação (lista vazia se não houver nenhuma)\n"
+        )
+
+        payload = _ollama_post(
+            f"{self.ollama_url}/api/generate",
+            {
+                "model": self.chat_model,
+                "prompt": prompt,
+                "stream": False,
+                "format": "json",
+                "options": {"temperature": 0.2},
+            },
+            model=self.chat_model,
+            timeout=300,
+        )
+
+        content = payload.get("response", "{}")
+        try:
+            raw = json.loads(content)
+        except json.JSONDecodeError:
+            raw = {"narrative": content}
+
+        narrative = normalize_projection_narrative(raw)
+        narrative["sources"] = [
+            {
+                "source_type": item["chunk"].source_type,
+                "source_id": item["chunk"].source_id,
+                "similarity": round(item["similarity"], 4),
+            }
+            for item in context_chunks
+            if item.get("chunk")
+        ]
+        return narrative

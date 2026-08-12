@@ -1,14 +1,14 @@
 <template>
   <header
-    class="sticky top-0 flex w-full bg-sepia-50 border-sepia-200 z-99999 border-b"
+    class="sticky top-0 flex w-full bg-sepia-950 border-sepia-800 z-99999 border-b"
   >
     <div class="flex flex-col items-center justify-between grow lg:flex-row lg:px-6">
       <div
-        class="flex items-center justify-between w-full gap-2 px-3 py-3 border-b border-sepia-200 sm:gap-4 lg:justify-normal lg:border-b-0 lg:px-0 lg:py-4"
+        class="flex items-center justify-between w-full gap-2 px-3 py-3 border-b border-sepia-800 sm:gap-4 lg:justify-normal lg:border-b-0 lg:px-0 lg:py-4"
       >
         <button
           type="button"
-          class="flex items-center justify-center w-10 h-10 text-sepia-500 border border-sepia-200 rounded-lg lg:w-11 lg:h-11 hover:bg-sepia-100"
+          class="flex items-center justify-center w-10 h-10 text-sepia-300 border border-sepia-800 rounded-lg lg:w-11 lg:h-11 hover:bg-sepia-900"
           @click="handleToggle"
         >
           <svg
@@ -43,13 +43,13 @@
             />
           </svg>
         </button>
-        <NuxtLink to="/dashboard" class="hidden lg:flex items-center gap-3 text-lg font-semibold text-sepia-900">
+        <NuxtLink to="/dashboard" class="hidden lg:flex items-center gap-3 text-lg font-semibold text-sepia-50 font-display">
           <img src="/logo.png" alt="MyFinances" class="h-8 w-auto">
           <span>MyFinances</span>
         </NuxtLink>
         <button
           type="button"
-          class="flex items-center justify-center w-10 h-10 text-sepia-700 rounded-lg hover:bg-sepia-100 lg:hidden"
+          class="flex items-center justify-center w-10 h-10 text-sepia-300 rounded-lg hover:bg-sepia-900 lg:hidden"
           @click="toggleApplicationMenu"
         >
           <svg
@@ -79,14 +79,14 @@
           <div class="relative">
             <button
               type="button"
-              class="relative flex items-center justify-center w-10 h-10 text-sepia-700 rounded-lg hover:bg-sepia-100"
+              class="relative flex items-center justify-center w-10 h-10 text-sepia-300 rounded-lg hover:bg-sepia-900"
               :title="count ? `${count} alerta(s)` : 'Nenhum alerta'"
               @click="alertsOpen = !alertsOpen"
             >
               <Icon icon="mdi:bell-outline" class="h-5 w-5" />
               <span
                 v-if="actionableCount"
-                class="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white"
+                class="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-vermelho-600 px-1 text-[10px] font-bold text-white"
               >
                 {{ actionableCount }}
               </span>
@@ -98,7 +98,7 @@
 
             <div
               v-if="alertsOpen"
-              class="absolute right-0 z-50 mt-2 w-80 rounded-xl border border-sepia-200 bg-white p-2 shadow-lg"
+              class="absolute right-0 z-50 mt-2 w-80 rounded-lg border border-sepia-200 bg-white p-2 shadow-lg"
             >
               <p v-if="!count" class="px-3 py-6 text-center text-sm text-sepia-400">
                 Nada precisa da sua atenção agora.
@@ -112,7 +112,7 @@
                   >
                     <Icon
                       :icon="ALERT_STYLES[alert.severity].icon"
-                      :class="['mt-0.5 h-4 w-4 shrink-0', alert.severity === 'danger' ? 'text-rose-600' : alert.severity === 'warning' ? 'text-amber-600' : 'text-sepia-400']"
+                      :class="['mt-0.5 h-4 w-4 shrink-0', alert.severity === 'danger' ? 'text-vermelho-600' : alert.severity === 'warning' ? 'text-amber-600' : 'text-sepia-400']"
                     />
                     <span class="min-w-0">
                       <span class="block text-sm font-medium text-sepia-900">{{ alert.title }}</span>
@@ -126,7 +126,7 @@
 
           <button
             type="button"
-            class="flex items-center justify-center w-10 h-10 text-sepia-700 rounded-lg hover:bg-sepia-100"
+            class="flex items-center justify-center w-10 h-10 text-sepia-300 rounded-lg hover:bg-sepia-900"
             :title="uiStore.isFinancialValueBlurred ? 'Mostrar valores' : 'Ocultar valores'"
             @click="toggleFinancialValueBlur"
           >
@@ -134,7 +134,7 @@
           </button>
           <button
             type="button"
-            class="flex items-center gap-2 px-3 py-2 text-sepia-700 rounded-lg hover:bg-sepia-100"
+            class="flex items-center gap-2 px-3 py-2 text-sepia-300 rounded-lg hover:bg-sepia-900"
             @click="handleLogout"
           >
             <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>

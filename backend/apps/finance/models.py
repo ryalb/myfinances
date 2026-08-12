@@ -316,6 +316,33 @@ class FinancialGoal(TimeStampedModel):
     status = models.CharField(max_length=20, choices=GoalStatus.choices, default=GoalStatus.ACTIVE)
 
 
+class MonthlyReview(TimeStampedModel):
+    """Ritual mensal de revisao financeira.
+
+    So o input do usuario persiste aqui (`adjustments`, `completed_at`) -- o resto
+    (variacao de patrimonio, tendencia de poupanca, deltas de categoria) e sempre
+    recalculado das tabelas fonte em
+    `consolidation.build_monthly_review_summary`, para nunca existir uma segunda
+    copia de um numero derivado que desalinha do que as tabelas fonte diriam hoje.
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="monthly_reviews"
+    )
+    year = models.PositiveSmallIntegerField()
+    month = models.PositiveSmallIntegerField()
+    # Ate 3 frases -- mesmo idiom de `PortfolioReport.strengths`.
+    adjustments = models.JSONField(default=list, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        unique_together = ("user", "year", "month")
+        ordering = ["-year", "-month"]
+
+    def __str__(self) -> str:
+        return f"{self.user_id}:{self.year}-{self.month:02d}"
+
+
 class SyncJobStatus(models.TextChoices):
     QUEUED = "queued", "Queued"
     RUNNING = "running", "Running"
@@ -488,12 +515,14 @@ class PortfolioReport(TimeStampedModel):
     """Relatorio de IA gerado por `LLMService.generate_portfolio_report`.
 
     Sem persistir, cada relatorio existia so no `ref` do frontend: um refresh de
-    pagina ou fechar a aba perdia a analise, e nao havia como comparar com uma
-    geracao anterior.
+    pagina ou fechar a aba perdia a analise. Um por usuario (`OneToOneField`),
+    nao historico: reanalisar substitui a analise anterior em vez de acumular --
+    a tela so precisa mostrar "a" analise atual, e o disco nao cresce sem limite
+    a cada clique em "Reanalisar".
     """
 
-    user = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="portfolio_reports"
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="portfolio_report"
     )
     query = models.CharField(max_length=500, blank=True)
     summary = models.TextField(blank=True)
@@ -506,6 +535,36 @@ class PortfolioReport(TimeStampedModel):
     # Fontes (DocumentChunk) usadas na geracao, com a similaridade de cada uma.
     # Guardado como snapshot: os chunks originais podem mudar ou ser removidos
     # depois, e o relatorio precisa continuar mostrando o que foi usado na epoca.
+    sources = models.JSONField(default=list, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"{self.user_id}:{self.created_at:%Y-%m-%d %H:%M}"
+
+
+class FutureProjectionReport(TimeStampedModel):
+    """Relatorio de IA gerado por `LLMService.generate_future_projection_narrative`.
+
+    O payload numerico (tabela horizonte x cenario, leverage points, viabilidade
+    de metas) e um snapshot serializado (float/isoformat) de
+    `projections.build_future_projection`, guardado junto da narracao: sem isso o
+    texto continuaria falando de numeros que os dados atuais do usuario ja nao
+    confirmam mais. Um por usuario (`OneToOneField`), mesmo motivo de
+    `PortfolioReport`: reanalisar substitui, nao acumula.
+    """
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="future_projection_report",
+    )
+    projection = models.JSONField(default=dict, blank=True)
+    narrative = models.TextField(blank=True)
+    leverage_explanation = models.JSONField(default=list, blank=True)
+    goal_commentary = models.JSONField(default=list, blank=True)
+    disclaimer = models.TextField(blank=True)
     sources = models.JSONField(default=list, blank=True)
 
     class Meta:

@@ -10,33 +10,69 @@ export default {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        sans: ['"Iosevka Nerd Font"', 'Iosevka', 'ui-monospace', 'monospace'],
+        display: ['"Iosevka Nerd Font"', 'Iosevka', 'ui-monospace', 'monospace'],
+        mono: ['"Space Mono"', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
+      },
       colors: {
+        // Ramo neutro "papel → tinta": mesmos tons usados como fundo de página
+        // (extremo claro) e texto/capa escura (extremo escuro) — a tinta do
+        // rodapé é a mesma tinta do texto, só que aplicada como fundo.
         brand: {
-          50: '#faf6f1',
-          100: '#f0e6d8',
-          200: '#e0ccb0',
-          300: '#c4a882',
-          400: '#a68b64',
-          500: '#8b7355',
-          600: '#6b5a45',
-          700: '#4a3c2e',
-          800: '#332a20',
-          900: '#1f1a14',
-          950: '#14110c',
+          50: '#fbf7ee',
+          100: '#f5eedd',
+          200: '#e7d9b8',
+          300: '#cfb683',
+          400: '#ad8a54',
+          500: '#85652f',
+          600: '#6b4f26',
+          700: '#4e3a1d',
+          800: '#33261a',
+          900: '#241b10',
+          950: '#160f09',
         },
         sepia: {
-          50: '#faf6f1',
-          100: '#f0e6d8',
-          200: '#e0ccb0',
-          300: '#c4a882',
-          400: '#a68b64',
-          500: '#8b7355',
-          600: '#6b5a45',
-          700: '#4a3c2e',
-          800: '#332a20',
-          900: '#1f1a14',
-          950: '#14110c',
-        }
+          50: '#fbf7ee',
+          100: '#f5eedd',
+          200: '#e7d9b8',
+          300: '#cfb683',
+          400: '#ad8a54',
+          500: '#85652f',
+          600: '#6b4f26',
+          700: '#4e3a1d',
+          800: '#33261a',
+          900: '#241b10',
+          950: '#160f09',
+        },
+        // "No azul" — convenção do extrato bancário brasileiro para saldo
+        // positivo. Substitui o emerald genérico nos valores financeiros.
+        azul: {
+          50: '#eaf1f7',
+          100: '#cfe1ee',
+          200: '#a3c6de',
+          300: '#74a8cb',
+          400: '#4d8ab5',
+          500: '#2e6c99',
+          600: '#235777',
+          700: '#1c4560',
+          800: '#16354a',
+          900: '#102538',
+        },
+        // "No vermelho" — mesma convenção para saldo negativo. Substitui o
+        // rose genérico.
+        vermelho: {
+          50: '#fbeded',
+          100: '#f5d2cf',
+          200: '#e8a6a0',
+          300: '#d97b72',
+          400: '#c25850',
+          500: '#a5423a',
+          600: '#8c3331',
+          700: '#712a28',
+          800: '#571f1e',
+          900: '#3d1615',
+        },
       },
       boxShadow: {
         'theme-sm': '0px 1px 3px 0px rgba(16, 24, 40, 0.1), 0px 1px 2px 0px rgba(16, 24, 40, 0.06)',

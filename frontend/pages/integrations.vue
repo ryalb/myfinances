@@ -98,9 +98,9 @@ const regenerateAuth = async () => {
           <h1 class="text-2xl font-semibold">Integrações financeiras</h1>
           <p class="mt-1 text-sepia-600">Conecte suas instituições para importar dados automaticamente via Pluggy.</p>
         </div>
-        <div class="flex gap-2">
+        <div class="flex shrink-0 gap-2">
           <Button
-            class="!rounded-lg !border !border-sepia-200 !bg-white !px-3 !py-1.5 !text-xs !font-medium !text-sepia-600 hover:!bg-sepia-50"
+            class="!rounded-lg !bg-sepia-900 !px-3 !py-1.5 !text-xs !font-medium !text-white !whitespace-nowrap hover:!bg-sepia-950"
             :disabled="regenerating"
             @click="regenerateAuth"
           >
@@ -109,18 +109,19 @@ const regenerateAuth = async () => {
         </div>
       </div>
 
-      <p v-if="regenerateSuccess" class="text-sm text-emerald-600">{{ regenerateSuccess }}</p>
-      <p v-if="regenerateError" class="text-sm text-rose-600">{{ regenerateError }}</p>
+      <p v-if="regenerateSuccess" class="text-sm text-azul-600">{{ regenerateSuccess }}</p>
+      <p v-if="regenerateError" class="text-sm text-vermelho-600">{{ regenerateError }}</p>
 
     <!-- Import an item by id -->
-    <div class="rounded-xl border border-sepia-200 bg-white p-4 shadow-sm">
-      <label for="item-id" class="block text-sm font-medium text-sepia-700">Importar item da Pluggy</label>
+    <div class="rounded-lg border border-sepia-200 bg-white p-4 shadow-sm">
+      <h3 class="mb-1 text-base font-semibold text-sepia-900">Importar item da Pluggy</h3>
       <p class="mt-1 text-xs text-sepia-500">
         Cole o <code class="rounded bg-sepia-100 px-1 py-0.5">itemId</code> que aparece no
         <a href="https://dashboard.pluggy.ai" target="_blank" class="text-sepia-500 underline">Dashboard da Pluggy</a>,
         em <strong>Itens Conectados</strong>, acima do nome do conector.
         Cada conexão do Meu Pluggy é um item separado — importe um por vez.
       </p>
+      <label for="item-id" class="sr-only">Importar item da Pluggy</label>
       <div class="mt-2 flex gap-2">
         <input
           id="item-id"
@@ -131,7 +132,7 @@ const regenerateAuth = async () => {
           @keyup.enter="importItem"
         >
         <Button
-          class="!rounded-lg !border !border-sepia-200 !bg-white !px-3 !py-1.5 !text-xs !font-medium !text-sepia-600 hover:!bg-sepia-50"
+          class="!rounded-lg !bg-sepia-900 !px-3 !py-1.5 !text-xs !font-medium !text-white !whitespace-nowrap hover:!bg-sepia-950 shrink-0"
           :disabled="importing"
           @click="importItem"
         >
@@ -140,8 +141,8 @@ const regenerateAuth = async () => {
       </div>
     </div>
 
-    <p v-if="importMessage" class="text-sm text-emerald-600">{{ importMessage }}</p>
-    <p v-if="importError" class="text-sm text-rose-600">{{ importError }}</p>
+    <p v-if="importMessage" class="text-sm text-azul-600">{{ importMessage }}</p>
+    <p v-if="importError" class="text-sm text-vermelho-600">{{ importError }}</p>
 
     <!-- Existing connections -->
     <div v-if="connections?.length" class="space-y-4">
@@ -152,7 +153,7 @@ const regenerateAuth = async () => {
     </div>
 
     <!-- Meu Pluggy instructions -->
-    <div class="rounded-xl border border-sepia-200 bg-white p-6 shadow-sm">
+    <div class="rounded-lg border border-sepia-200 bg-white p-6 shadow-sm">
       <h2 class="text-lg font-semibold text-sepia-900">Conecte suas contas via Meu Pluggy</h2>
       <p class="mt-2 text-sm text-sepia-600">
         Para uso pessoal gratuito, utilize o <a href="https://meu.pluggy.ai" target="_blank" class="text-sepia-500 underline">Meu Pluggy</a>:

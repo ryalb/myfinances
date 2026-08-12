@@ -22,15 +22,15 @@ const { items: jobs, count } = usePaginatedList<SyncJobRow>('sync-jobs', '/sync-
 const statusColors: Record<string, string> = {
   queued: 'bg-sepia-100 text-sepia-600',
   running: 'bg-sepia-100 text-sepia-700',
-  success: 'bg-emerald-100 text-emerald-700',
-  failed: 'bg-rose-100 text-rose-700',
+  success: 'bg-azul-100 text-azul-700',
+  failed: 'bg-vermelho-100 text-vermelho-700',
 }
 
 const formatTime = formatIsoDateTime
 </script>
 
 <template>
-  <div class="overflow-hidden rounded-xl border border-sepia-200 bg-white shadow-sm">
+  <div class="overflow-hidden rounded-lg border border-sepia-200 bg-white shadow-sm">
     <div class="overflow-x-auto">
       <table class="w-full text-sm">
         <thead class="border-b border-sepia-200 bg-sepia-50">
@@ -58,7 +58,7 @@ const formatTime = formatIsoDateTime
             <td class="px-4 py-3 text-sepia-500">{{ formatTime(job.started_at) }}</td>
             <td class="px-4 py-3 text-sepia-500">{{ formatTime(job.finished_at) }}</td>
             <td class="px-4 py-3">
-              <span v-if="job.error_message" class="text-xs text-rose-600">{{ job.error_message.slice(0, 60) }}...</span>
+              <span v-if="job.error_message" class="text-xs text-vermelho-600">{{ job.error_message.slice(0, 60) }}...</span>
               <span v-else class="text-sepia-400">—</span>
             </td>
           </tr>

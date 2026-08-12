@@ -12,6 +12,7 @@ from .consolidation import (
     build_subscription_overview,
     build_user_financial_summary,
 )
+from .health_score import build_financial_health_score
 from .models import (
     Account,
     CategorizationRule,
@@ -23,6 +24,11 @@ from .models import (
     PensionPlan,
     Subscription,
     SubscriptionPayment,
+)
+from .projections import (
+    DEFAULT_SCENARIO_RATES,
+    build_future_projection,
+    serialize_future_projection,
 )
 
 
@@ -202,6 +208,58 @@ class AlertType(graphene.ObjectType):
     action_path = graphene.String()
 
 
+class HealthScoreComponentType(graphene.ObjectType):
+    key = graphene.String()
+    label = graphene.String()
+    score = graphene.Float()
+    weight = graphene.Float()
+    detail = graphene.String()
+
+
+class FinancialHealthScoreType(graphene.ObjectType):
+    score = graphene.Float()
+    components = graphene.List(HealthScoreComponentType)
+    top_actions = graphene.List(graphene.String)
+
+
+class ScenarioValueType(graphene.ObjectType):
+    years = graphene.Int()
+    net_worth = graphene.Float()
+
+
+class ScenarioSeriesType(graphene.ObjectType):
+    name = graphene.String()
+    values = graphene.List(ScenarioValueType)
+
+
+class LeveragePointType(graphene.ObjectType):
+    key = graphene.String()
+    label = graphene.String()
+    projected_net_worth = graphene.Float()
+    impact = graphene.Float()
+
+
+class GoalViabilityType(graphene.ObjectType):
+    id = graphene.Int()
+    name = graphene.String()
+    target_amount = graphene.Float()
+    target_date = graphene.String()
+    on_track = graphene.Boolean()
+    shortfall = graphene.Float()
+    projected_growth = graphene.Float()
+    remaining_needed = graphene.Float()
+
+
+class FutureProjectionType(graphene.ObjectType):
+    current_net_worth = graphene.Float()
+    monthly_contribution = graphene.Float()
+    horizons = graphene.List(graphene.Int)
+    scenarios = graphene.List(ScenarioSeriesType)
+    stress = graphene.List(ScenarioValueType)
+    leverage_points = graphene.List(LeveragePointType)
+    goals = graphene.List(GoalViabilityType)
+
+
 def _request_cached(info, key, factory):
     """Memoiza um calculo pelo tempo de vida da requisicao.
 
@@ -243,6 +301,8 @@ class Query(graphene.ObjectType):
     investment_positions = graphene.List(InvestmentPositionType, investment_id=graphene.Int())
     subscription_overview = graphene.Field(SubscriptionOverviewType, upcoming_days=graphene.Int())
     alerts = graphene.List(AlertType)
+    future_projection = graphene.Field(FutureProjectionType)
+    financial_health_score = graphene.Field(FinancialHealthScoreType)
 
     def resolve_institutions(self, info):
         user = info.context.user
@@ -398,8 +458,11 @@ class Query(graphene.ObjectType):
                 if months_to_freedom < 0:
                     months_to_freedom = 0
 
-        # Different scenarios with different assumed returns
-        scenarios = {"conservative": 0.04, "base": 0.08, "aggressive": 0.12}
+        # Cenarios com retornos diferentes -- mesmas taxas do simulador de futuro
+        # financeiro (`projections.DEFAULT_SCENARIO_RATES`), para as duas
+        # projecoes nunca divergirem sobre o que e uma carteira
+        # conservadora/base/agressiva.
+        scenarios = {name: float(rate) for name, rate in DEFAULT_SCENARIO_RATES.items()}
         scenario_months = {}
         for name, rate in scenarios.items():
             monthly_r = rate / 12
@@ -515,3 +578,59 @@ class Query(graphene.ObjectType):
         if not user or not user.is_authenticated:
             return []
         return [AlertType(**alert) for alert in build_user_alerts(user)]
+
+    def resolve_future_projection(self, info):
+        user = info.context.user
+        if not user or not user.is_authenticated:
+            return None
+
+        data = serialize_future_projection(build_future_projection(user))
+
+        scenarios = [
+            ScenarioSeriesType(
+                name=name,
+                values=[
+                    ScenarioValueType(years=int(years), net_worth=value)
+                    for years, value in series.items()
+                ],
+            )
+            for name, series in data["scenarios"].items()
+        ]
+        stress = [
+            ScenarioValueType(years=int(years), net_worth=value)
+            for years, value in data["stress"].items()
+        ]
+        leverage_points = [LeveragePointType(**point) for point in data["leverage_points"]]
+        goals = [GoalViabilityType(**goal) for goal in data["goals"]]
+
+        return FutureProjectionType(
+            current_net_worth=data["current_net_worth"],
+            monthly_contribution=data["monthly_contribution"],
+            horizons=data["horizons"],
+            scenarios=scenarios,
+            stress=stress,
+            leverage_points=leverage_points,
+            goals=goals,
+        )
+
+    def resolve_financial_health_score(self, info):
+        user = info.context.user
+        if not user or not user.is_authenticated:
+            return None
+
+        data = build_financial_health_score(user)
+        components = [
+            HealthScoreComponentType(
+                key=component["key"],
+                label=component["label"],
+                score=float(component["score"]),
+                weight=float(component["weight"]),
+                detail=component["detail"],
+            )
+            for component in data["components"]
+        ]
+        return FinancialHealthScoreType(
+            score=float(data["score"]),
+            components=components,
+            top_actions=data["top_actions"],
+        )

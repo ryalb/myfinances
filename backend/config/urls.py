@@ -13,10 +13,12 @@ from apps.finance.views import (
     FinancialGoalViewSet,
     FinancialInstitutionViewSet,
     FinancialSummaryAPIView,
+    FutureProjectionAPIView,
     HealthCheckAPIView,
     InvestmentPositionViewSet,
     InvestmentViewSet,
     MonthlyCashFlowAPIView,
+    MonthlyReviewAPIView,
     NetWorthSnapshotAPIView,
     PensionPlanViewSet,
     PluggyConnectTokenAPIView,
@@ -24,7 +26,6 @@ from apps.finance.views import (
     PluggyRegenerateAuthAPIView,
     PluggyWebhookAPIView,
     PortfolioReportAPIView,
-    PortfolioReportViewSet,
     RegisterAPIView,
     SubscriptionPaymentViewSet,
     SubscriptionViewSet,
@@ -50,7 +51,6 @@ router.register(
     r"subscription-payments", SubscriptionPaymentViewSet, basename="subscription-payment"
 )
 router.register(r"categorization-rules", CategorizationRuleViewSet, basename="categorization-rule")
-router.register(r"ai/portfolio-reports", PortfolioReportViewSet, basename="portfolio-report-history")
 
 urlpatterns = [
     path("admin/", admin.site.urls),
@@ -60,6 +60,11 @@ urlpatterns = [
     path("api/v1/auth/register/", RegisterAPIView.as_view(), name="register"),
     path("api/v1/summary/", FinancialSummaryAPIView.as_view(), name="financial-summary"),
     path("api/v1/cash-flow/", MonthlyCashFlowAPIView.as_view(), name="monthly-cash-flow"),
+    path(
+        "api/v1/monthly-review/",
+        MonthlyReviewAPIView.as_view(),
+        name="monthly-review",
+    ),
     path(
         "api/v1/net-worth/snapshot/",
         NetWorthSnapshotAPIView.as_view(),
@@ -100,6 +105,11 @@ urlpatterns = [
         "api/v1/ai/portfolio-report/",
         PortfolioReportAPIView.as_view(),
         name="portfolio-report",
+    ),
+    path(
+        "api/v1/ai/future-projection/",
+        FutureProjectionAPIView.as_view(),
+        name="future-projection-report",
     ),
     path("graphql/", JWTGraphQLView.as_view(graphiql=True)),
 ]

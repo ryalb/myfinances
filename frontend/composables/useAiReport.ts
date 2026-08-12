@@ -29,6 +29,7 @@ const SOURCE_LABELS: Record<string, string> = {
   investments: 'Investimentos',
   pension_plans: 'Previdência',
   goals: 'Metas',
+  future_projection: 'Simulação de futuro financeiro',
   subscriptions: 'Assinaturas',
   categorization_rules: 'Regras de categorização',
   sync_history: 'Histórico de sincronização',
@@ -43,16 +44,22 @@ export function sourceLabel(source: ReportSource): string {
 }
 
 export function useAiReport() {
-  const { post, del } = useApi()
+  const { get, post, del } = useApi()
 
-  const report = ref<PortfolioReport | null>(null)
+  // Carrega a análise já persistida (se existir) assim que a página monta --
+  // "Reanalisar" substitui essa análise, não empilha uma nova.
+  const { data: report, refresh } = useAsyncData<PortfolioReport | null>(
+    'ai-portfolio-report',
+    () => get<PortfolioReport>('/ai/portfolio-report/'),
+    { default: () => null },
+  )
+
   const loading = ref(false)
   const error = ref('')
 
   const generate = async (query?: string) => {
     loading.value = true
     error.value = ''
-    report.value = null
     try {
       const body = query?.trim() ? { query: query.trim() } : {}
       report.value = await post<PortfolioReport>('/ai/portfolio-report/', body)
@@ -63,16 +70,10 @@ export function useAiReport() {
     }
   }
 
-  // Mostra um relatório já persistido (histórico) sem chamar a LLM de novo.
-  const view = (saved: PortfolioReport) => {
-    error.value = ''
-    report.value = saved
+  const remove = async () => {
+    await del('/ai/portfolio-report/')
+    report.value = null
   }
 
-  const remove = async (id: number) => {
-    await del(`/ai/portfolio-reports/${id}/`)
-    if (report.value?.id === id) report.value = null
-  }
-
-  return { report, loading, error, generate, view, remove }
+  return { report, loading, error, generate, remove, refresh }
 }

@@ -22,9 +22,9 @@ const lastSyncEvent = useSyncEvent()
 let syncTimeout: ReturnType<typeof setTimeout> | null = null
 
 const statusColors: Record<string, string> = {
-  active: 'bg-emerald-100 text-emerald-700',
+  active: 'bg-azul-100 text-azul-700',
   pending: 'bg-amber-100 text-amber-700',
-  error: 'bg-rose-100 text-rose-700',
+  error: 'bg-vermelho-100 text-vermelho-700',
   expired: 'bg-sepia-100 text-sepia-600',
 }
 
@@ -79,10 +79,10 @@ const remove = async () => {
 </script>
 
 <template>
-  <div class="rounded-xl border border-sepia-200 bg-white p-5 shadow-sm">
+  <div class="rounded-lg border border-sepia-200 bg-white p-5 shadow-sm">
     <div class="flex items-start justify-between">
       <div>
-        <h4 class="font-semibold text-sepia-900">{{ props.connection.institution.name }}</h4>
+        <h3 class="font-semibold text-sepia-900">{{ props.connection.institution.name }}</h3>
         <p class="mt-1 text-xs text-sepia-500">Conectado em {{ formatIsoDateOnly(props.connection.created_at) }}</p>
       </div>
       <span :class="['rounded-full px-2 py-0.5 text-xs font-medium', statusColors[props.connection.status] || 'bg-sepia-100 text-sepia-600']">
@@ -96,18 +96,18 @@ const remove = async () => {
     </div>
 
     <!-- Error message -->
-    <p v-if="props.connection.error_message" class="mt-2 text-xs text-rose-600">
+    <p v-if="props.connection.error_message" class="mt-2 text-xs text-vermelho-600">
       {{ props.connection.error_message }}
     </p>
 
     <!-- Falha da última ação nesta conexão (sync/remoção) -->
-    <p v-if="error" class="mt-2 text-xs text-rose-600">{{ error }}</p>
+    <p v-if="error" class="mt-2 text-xs text-vermelho-600">{{ error }}</p>
 
     <!-- Actions -->
     <div class="mt-4 flex gap-2">
       <Button
         :disabled="syncing"
-        class="!flex !items-center !gap-1.5 !rounded-lg !border !border-sepia-200 !bg-white !px-3 !py-1.5 !text-xs !font-medium !text-sepia-600 hover:!bg-sepia-50 disabled:!opacity-50"
+        class="!flex !items-center !gap-1.5 !rounded-lg !bg-sepia-900 !px-3 !py-1.5 !text-xs !font-medium !text-white !whitespace-nowrap hover:!bg-sepia-950 disabled:!opacity-50"
         @click="sync"
       >
         <Icon v-if="syncing" icon="mdi:loading" class="h-3.5 w-3.5 animate-spin" />
@@ -115,7 +115,7 @@ const remove = async () => {
       </Button>
       <Button
         :disabled="removing"
-        class="!rounded-lg !border !border-rose-200 !bg-white !px-3 !py-1.5 !text-xs !font-medium !text-rose-600 hover:!bg-rose-50 disabled:!opacity-50"
+        class="!rounded-lg !bg-vermelho-600 !px-3 !py-1.5 !text-xs !font-medium !text-white !whitespace-nowrap hover:!bg-vermelho-700 disabled:!opacity-50"
         @click="remove"
       >
         {{ removing ? 'Removendo...' : 'Remover' }}

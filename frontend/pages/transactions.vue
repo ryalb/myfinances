@@ -150,7 +150,7 @@ const exportCsv = async () => {
 
 const typeBadge = (tx: TransactionRow) => {
   if (tx.is_internal_transfer) return 'bg-sepia-100 text-sepia-500'
-  return tx.type === 'credit' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'
+  return tx.type === 'credit' ? 'bg-azul-100 text-azul-700' : 'bg-vermelho-100 text-vermelho-700'
 }
 
 // Pagamento de fatura de cartao e transferencia entre contas proprias nao sao
@@ -187,7 +187,7 @@ const inputClass
         <button
           type="button"
           :disabled="exporting || !count"
-          class="inline-flex items-center gap-2 rounded-lg border border-sepia-200 bg-white px-3 py-1.5 text-xs font-medium text-sepia-600 hover:bg-sepia-50 disabled:opacity-40"
+          class="inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-lg bg-sepia-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-sepia-950 disabled:opacity-40"
           @click="exportCsv"
         >
           <Icon icon="mdi:download-outline" class="h-4 w-4" />
@@ -196,12 +196,12 @@ const inputClass
       </div>
     </div>
 
-    <p v-if="exportError" class="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+    <p v-if="exportError" class="rounded-lg border border-vermelho-200 bg-vermelho-50 px-4 py-3 text-sm text-vermelho-700">
       {{ exportError }}
     </p>
 
     <!-- Filtros -->
-    <div class="rounded-xl border border-sepia-200 bg-white p-4 shadow-sm">
+    <div class="rounded-lg border border-sepia-200 bg-white p-4 shadow-sm">
       <div class="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
         <div class="lg:col-span-2">
           <label class="mb-1 block text-xs font-medium text-sepia-700">Buscar na descrição</label>
@@ -252,7 +252,7 @@ const inputClass
       <div v-if="hasActiveFilter" class="mt-3 flex justify-end">
         <button
           type="button"
-          class="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-sepia-600 hover:bg-sepia-50"
+          class="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg bg-sepia-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-sepia-950"
           @click="clearFilters"
         >
           <Icon icon="mdi:filter-remove-outline" class="h-4 w-4" />
@@ -271,7 +271,7 @@ const inputClass
       </p>
     </div>
 
-    <div v-else class="overflow-hidden rounded-xl border border-sepia-200 bg-white shadow-sm">
+    <div v-else class="overflow-hidden rounded-lg border border-sepia-200 bg-white shadow-sm">
       <table class="w-full text-sm">
         <thead class="border-b border-sepia-200 bg-sepia-50">
           <tr>
@@ -309,7 +309,7 @@ const inputClass
                 {{ typeLabel(tx) }}
               </span>
             </td>
-            <td :class="['whitespace-nowrap px-4 py-3 text-right font-medium', tx.is_internal_transfer ? 'text-sepia-500' : (tx.type === 'credit' ? 'text-emerald-600' : 'text-rose-600'), blur]">
+            <td :class="['whitespace-nowrap px-4 py-3 text-right font-mono font-medium', tx.is_internal_transfer ? 'text-sepia-500' : (tx.type === 'credit' ? 'text-azul-600' : 'text-vermelho-600'), blur]">
               {{ tx.is_internal_transfer ? '' : (tx.type === 'credit' ? '+' : '-') }}{{ formatBRL(Math.abs(Number(tx.amount))) }}
             </td>
           </tr>
@@ -320,7 +320,7 @@ const inputClass
         <button
           type="button"
           :disabled="!hasPrevious || loading"
-          class="rounded-lg border border-sepia-200 bg-white px-3 py-1.5 text-xs font-medium text-sepia-600 hover:bg-sepia-50 disabled:opacity-40"
+          class="whitespace-nowrap rounded-lg bg-sepia-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-sepia-950 disabled:opacity-40"
           @click="previous"
         >
           Anterior
@@ -329,7 +329,7 @@ const inputClass
         <button
           type="button"
           :disabled="!hasNext || loading"
-          class="rounded-lg border border-sepia-200 bg-white px-3 py-1.5 text-xs font-medium text-sepia-600 hover:bg-sepia-50 disabled:opacity-40"
+          class="whitespace-nowrap rounded-lg bg-sepia-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-sepia-950 disabled:opacity-40"
           @click="next"
         >
           Próxima

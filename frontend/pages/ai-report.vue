@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import Button from 'primevue/button'
 import { sourceLabel } from '@/composables/useAiReport'
-import type { PortfolioReport } from '@/composables/useAiReport'
 import { formatIsoDateTime } from '@/composables/useDateFormat'
 import { extractApiError } from '@/composables/useApi'
 
@@ -9,48 +8,26 @@ definePageMeta({
   middleware: 'auth',
 })
 
-const { report, loading, error, generate, view, remove } = useAiReport()
+const { report, loading, error, generate, remove } = useAiReport()
 const query = ref('')
-const removingId = ref<number | null>(null)
-
-// Histórico dos relatórios já gerados, persistidos no backend para consulta
-// posterior -- sem isso um refresh de página perdia a análise.
-const {
-  items: history,
-  count: historyCount,
-  refresh: refreshHistory,
-} = usePaginatedList<PortfolioReport>('ai-reports', '/ai/portfolio-reports/', { pageSize: 10 })
+const removing = ref(false)
 
 const onGenerate = async () => {
   await generate(query.value)
-  await refreshHistory()
 }
 
-const onRemove = async (item: PortfolioReport) => {
-  if (!window.confirm(`Excluir o relatório de ${formatDate(item.created_at)}?`)) return
-  removingId.value = item.id
+const onRemove = async () => {
+  if (!report.value) return
+  if (!window.confirm(`Excluir a análise gerada em ${formatDate(report.value.created_at)}?`)) return
+  removing.value = true
   try {
-    await remove(item.id)
-    await refreshHistory()
-    // O relatório exibido acabou de ser apagado: mostra o próximo do histórico
-    // em vez de deixar a tela em branco.
-    if (!report.value && history.value.length) view(history.value[0])
+    await remove()
   } catch (e: unknown) {
     error.value = extractApiError(e, 'Erro ao excluir o relatório.')
   } finally {
-    removingId.value = null
+    removing.value = false
   }
 }
-
-// Ao entrar na tela, mostra o relatório mais recente em vez de ficar em branco:
-// a análise já existe, só não foi gerada nesta sessão.
-watch(
-  history,
-  (items) => {
-    if (!report.value && items.length) view(items[0])
-  },
-  { immediate: true },
-)
 
 const formatDate = formatIsoDateTime
 
@@ -61,7 +38,7 @@ const listSections = computed(() => {
       key: 'strengths',
       title: 'Pontos fortes',
       icon: 'mdi:check-circle-outline',
-      accent: 'text-emerald-600',
+      accent: 'text-azul-600',
       items: report.value.strengths,
     },
     {
@@ -108,7 +85,7 @@ const isEmpty = computed(
       </p>
     </div>
 
-    <div class="rounded-xl border border-sepia-200 bg-white p-5 shadow-sm">
+    <div class="rounded-lg border border-sepia-200 bg-white p-5 shadow-sm">
       <label class="mb-1 block text-sm font-medium text-sepia-700">
         Foco da análise
         <span class="font-normal text-sepia-400">(opcional)</span>
@@ -123,70 +100,52 @@ const isEmpty = computed(
         >
         <Button
           :disabled="loading"
-          class="!rounded-lg !bg-sepia-600 !px-4 !py-2 !text-sm !font-medium !text-white hover:!bg-sepia-700 disabled:!opacity-50 whitespace-nowrap"
+          class="!rounded-lg !bg-sepia-900 !px-4 !py-2 !text-sm !font-medium !text-white hover:!bg-sepia-950 disabled:!opacity-50 whitespace-nowrap shrink-0"
           @click="onGenerate"
         >
-          {{ loading ? 'Analisando...' : 'Gerar relatório' }}
+          {{ loading ? 'Analisando...' : (report ? 'Reanalisar' : 'Gerar relatório') }}
         </Button>
       </div>
       <p class="mt-2 text-xs text-sepia-400">
-        A primeira geração indexa seus dados e pode levar mais tempo.
+        {{
+          report
+            ? `Última análise gerada em ${formatDate(report.created_at)}. Reanalisar substitui esta análise -- não fica histórico.`
+            : 'A primeira geração indexa seus dados e pode levar mais tempo.'
+        }}
       </p>
     </div>
 
-    <div v-if="history.length" class="rounded-xl border border-sepia-200 bg-white p-5 shadow-sm">
-      <h3 class="mb-3 text-sm font-semibold text-sepia-900">Relatórios anteriores</h3>
-      <ul class="flex flex-wrap gap-2">
-        <li
-          v-for="item in history"
-          :key="item.id"
-          :class="[
-            'flex items-center gap-1 rounded-full border pl-3 pr-1 text-xs transition',
-            report?.id === item.id
-              ? 'border-sepia-600 bg-sepia-600 text-white'
-              : 'border-sepia-200 bg-sepia-50 text-sepia-700 hover:border-sepia-400',
-          ]"
-        >
-          <button type="button" class="py-1" @click="view(item)">
-            {{ formatDate(item.created_at) }}
-          </button>
-          <button
-            type="button"
-            :disabled="removingId === item.id"
-            title="Excluir relatório"
-            class="rounded-full p-1 opacity-60 hover:opacity-100 disabled:opacity-30"
-            @click="onRemove(item)"
-          >
-            <Icon icon="mdi:close" class="h-3.5 w-3.5" />
-          </button>
-        </li>
-      </ul>
-      <p v-if="historyCount > history.length" class="mt-2 text-xs text-sepia-400">
-        Mostrando {{ history.length }} de {{ historyCount }} relatórios.
-      </p>
-    </div>
-
-    <p v-if="error" class="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+    <p v-if="error" class="rounded-lg border border-vermelho-200 bg-vermelho-50 px-4 py-3 text-sm text-vermelho-700">
       {{ error }}
     </p>
 
-    <div v-if="loading" class="rounded-xl border border-sepia-200 bg-white p-8 text-center shadow-sm">
+    <div v-if="loading" class="rounded-lg border border-sepia-200 bg-white p-8 text-center shadow-sm">
       <Icon icon="mdi:loading" class="mx-auto mb-3 h-8 w-8 animate-spin text-sepia-400" />
       <p class="text-sm text-sepia-500">Indexando dados e consultando o modelo local...</p>
     </div>
 
     <template v-else-if="report">
-      <p class="rounded-lg border border-sepia-200 bg-sepia-50 px-4 py-3 text-xs text-sepia-600">
-        <Icon icon="mdi:information-outline" class="mr-1 inline h-4 w-4 align-text-bottom" />
-        {{ report.disclaimer }}
-      </p>
+      <div class="flex flex-wrap items-start justify-between gap-2">
+        <p class="flex-1 rounded-lg border border-sepia-200 bg-sepia-50 px-4 py-3 text-xs text-sepia-600">
+          <Icon icon="mdi:information-outline" class="mr-1 inline h-4 w-4 align-text-bottom" />
+          {{ report.disclaimer }}
+        </p>
+        <button
+          type="button"
+          :disabled="removing"
+          class="shrink-0 text-xs text-vermelho-600 hover:underline disabled:opacity-50"
+          @click="onRemove"
+        >
+          {{ removing ? 'Excluindo...' : 'Excluir esta análise' }}
+        </button>
+      </div>
 
       <p v-if="isEmpty" class="rounded-lg border border-dashed border-sepia-300 p-8 text-center text-sm text-sepia-500">
         O modelo não retornou conteúdo. Tente novamente ou reformule o foco da análise.
       </p>
 
-      <div v-if="report.summary" class="rounded-xl border border-sepia-200 bg-white p-5 shadow-sm">
-        <h3 class="mb-2 text-lg font-semibold text-sepia-900">Resumo</h3>
+      <div v-if="report.summary" class="rounded-lg border border-sepia-200 bg-white p-5 shadow-sm">
+        <h3 class="mb-3 text-base font-semibold text-sepia-900">Resumo</h3>
         <p class="whitespace-pre-line text-sm leading-relaxed text-sepia-700">{{ report.summary }}</p>
       </div>
 
@@ -194,7 +153,7 @@ const isEmpty = computed(
         <div
           v-for="section in listSections"
           :key="section.key"
-          class="rounded-xl border border-sepia-200 bg-white p-5 shadow-sm"
+          class="rounded-lg border border-sepia-200 bg-white p-5 shadow-sm"
         >
           <h3 class="mb-3 flex items-center gap-2 text-base font-semibold text-sepia-900">
             <Icon :icon="section.icon" :class="['h-5 w-5', section.accent]" />
@@ -209,8 +168,8 @@ const isEmpty = computed(
         </div>
       </div>
 
-      <div v-if="report.projections" class="rounded-xl border border-sepia-200 bg-white p-5 shadow-sm">
-        <h3 class="mb-2 flex items-center gap-2 text-base font-semibold text-sepia-900">
+      <div v-if="report.projections" class="rounded-lg border border-sepia-200 bg-white p-5 shadow-sm">
+        <h3 class="mb-3 flex items-center gap-2 text-base font-semibold text-sepia-900">
           <Icon icon="mdi:chart-line" class="h-5 w-5 text-sepia-700" />
           Projeções
         </h3>
@@ -218,7 +177,7 @@ const isEmpty = computed(
       </div>
 
       <!-- Rastreabilidade: o que o modelo recebeu como contexto -->
-      <div v-if="report.sources?.length" class="rounded-xl border border-sepia-200 bg-white p-5 shadow-sm">
+      <div v-if="report.sources?.length" class="rounded-lg border border-sepia-200 bg-white p-5 shadow-sm">
         <h3 class="mb-1 text-base font-semibold text-sepia-900">Fontes usadas</h3>
         <p class="mb-3 text-xs text-sepia-400">
           Dados do seu histórico enviados ao modelo, com a relevância de cada um.

@@ -37,7 +37,7 @@ const typeLabels: Record<string, string> = {
 
 const typeColors: Record<string, string> = {
   checking: 'bg-sepia-100 text-sepia-700',
-  savings: 'bg-emerald-100 text-emerald-700',
+  savings: 'bg-azul-100 text-azul-700',
   brokerage: 'bg-sepia-100 text-sepia-700',
   credit: 'bg-amber-100 text-amber-700',
   other: 'bg-sepia-100 text-sepia-600',
@@ -60,7 +60,7 @@ const uiStore = useUiStore()
       <article
         v-for="account in accounts"
         :key="account.id"
-        class="rounded-xl border border-sepia-200 bg-white p-5 shadow-sm"
+        class="rounded-lg border border-sepia-200 bg-white p-5 shadow-sm"
       >
         <div class="flex items-start justify-between">
           <div>
@@ -74,7 +74,7 @@ const uiStore = useUiStore()
               <span v-if="account.identity.document">· {{ account.identity.document }}</span>
             </p>
           </div>
-          <p :class="['text-right text-lg font-bold text-sepia-900', uiStore.isFinancialValueBlurred ? 'blur-sm select-none' : '']">{{ formatBRL(account.available_balance || account.balance) }}</p>
+          <p :class="['text-right font-mono text-lg font-bold text-sepia-900', uiStore.isFinancialValueBlurred ? 'blur-sm select-none' : '']">{{ formatBRL(account.available_balance || account.balance) }}</p>
         </div>
         <p :class="['mt-2 text-xs text-sepia-400', uiStore.isFinancialValueBlurred ? 'blur-sm select-none' : '']">Saldo disponível: {{ formatBRL(account.available_balance) }}</p>
       </article>

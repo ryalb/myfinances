@@ -103,11 +103,11 @@ const remove = async (plan: PensionPlan) => {
       </p>
     </div>
 
-    <p v-if="error" class="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+    <p v-if="error" class="rounded-lg border border-vermelho-200 bg-vermelho-50 px-4 py-3 text-sm text-vermelho-700">
       {{ error }}
     </p>
 
-    <div class="rounded-xl border border-sepia-200 bg-white p-5 shadow-sm">
+    <div class="rounded-lg border border-sepia-200 bg-white p-5 shadow-sm">
       <h3 class="mb-3 text-base font-semibold text-sepia-900">Adicionar plano manualmente</h3>
       <div class="grid gap-3 sm:grid-cols-[2fr_2fr_1fr_auto] sm:items-end">
         <div>
@@ -141,7 +141,7 @@ const remove = async (plan: PensionPlan) => {
         </div>
         <Button
           :disabled="saving"
-          class="!rounded-lg !bg-sepia-600 !px-4 !py-2 !text-sm !font-medium !text-white hover:!bg-sepia-700 disabled:!opacity-50"
+          class="!rounded-lg !bg-sepia-900 !px-4 !py-2 !text-sm !font-medium !text-white !whitespace-nowrap hover:!bg-sepia-950 disabled:!opacity-50"
           @click="submit"
         >
           {{ saving ? 'Salvando...' : 'Adicionar' }}
@@ -159,7 +159,7 @@ const remove = async (plan: PensionPlan) => {
       <article
         v-for="plan in plans"
         :key="plan.id"
-        class="rounded-xl border border-sepia-200 bg-white p-5 shadow-sm"
+        class="rounded-lg border border-sepia-200 bg-white p-5 shadow-sm"
       >
         <div v-if="editingId === plan.id" class="space-y-3">
           <div>
@@ -194,7 +194,7 @@ const remove = async (plan: PensionPlan) => {
               rounded
               :disabled="busyId === plan.id"
               title="Salvar"
-              class="!text-emerald-600 hover:!text-emerald-700"
+              class="!text-azul-600 hover:!text-azul-700"
               @click="saveEdit(plan)"
             >
               <Icon icon="mdi:check" class="h-5 w-5" />
@@ -224,7 +224,7 @@ const remove = async (plan: PensionPlan) => {
             </span>
           </div>
           <div class="flex flex-col items-end gap-2">
-            <p :class="['text-right text-lg font-bold text-sepia-900', uiStore.isFinancialValueBlurred ? 'blur-sm select-none' : '']">
+            <p :class="['text-right font-mono text-lg font-bold text-sepia-900', uiStore.isFinancialValueBlurred ? 'blur-sm select-none' : '']">
               {{ formatBRL(plan.balance) }}
             </p>
             <div v-if="plan.is_manual" class="flex items-center gap-1">
@@ -243,7 +243,7 @@ const remove = async (plan: PensionPlan) => {
                 rounded
                 :disabled="busyId === plan.id"
                 title="Excluir"
-                class="!text-sepia-400 hover:!text-rose-600"
+                class="!text-sepia-400 hover:!text-vermelho-600"
                 @click="remove(plan)"
               >
                 <Icon icon="mdi:trash-can-outline" class="h-5 w-5" />

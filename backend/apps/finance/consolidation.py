@@ -2,6 +2,7 @@ import calendar
 from datetime import date, datetime, time, timedelta
 from datetime import date as date_type
 from decimal import Decimal
+from typing import TypedDict
 
 from django.conf import settings
 from django.db.models import Q, Sum
@@ -12,7 +13,10 @@ from .domain import classify_account_balance
 from .models import (
     Account,
     Card,
+    FinancialGoal,
+    GoalStatus,
     InvestmentPosition,
+    MonthlyReview,
     NetWorthSnapshot,
     PensionPlan,
     Subscription,
@@ -66,6 +70,19 @@ def build_user_financial_summary(user) -> dict:
     }
 
 
+def _exclude_internal_transfers(queryset):
+    """Remove transferencias internas (fatura de cartao, transferencia entre
+    contas proprias) de um queryset de `Transaction`.
+
+    Extraido daqui porque a mesma exclusao passou a ser necessaria em mais de um
+    lugar (fluxo de caixa, deltas de categoria da revisao mensal): repetir o
+    annotate+exclude arrisca a lista de categorias divergir entre eles.
+    """
+    return queryset.annotate(provider_category_lower=Lower("provider_category")).exclude(
+        provider_category_lower__in=settings.FINANCE_INTERNAL_TRANSFER_CATEGORIES
+    )
+
+
 def build_monthly_cash_flow_for_range(user, start_date, end_date) -> dict:
     """Build cash flow for an arbitrary date range (exclusive end)."""
     # `booked_at` e DateTimeField; filtrar com um `date` cru promove para meia-
@@ -79,14 +96,12 @@ def build_monthly_cash_flow_for_range(user, start_date, end_date) -> dict:
     # pela categoria, o lado do cartao virava receita fantasma e o lado da conta
     # duplicava uma despesa que ja foi contada quando a compra ocorreu no cartao.
     # O mesmo vale para transferencia entre contas do proprio usuario.
-    transactions = (
+    transactions = _exclude_internal_transfers(
         Transaction.objects.filter(
             Q(account__connection__user=user) | Q(card__connection__user=user),
             booked_at__gte=start_at,
             booked_at__lt=end_at,
         )
-        .annotate(provider_category_lower=Lower("provider_category"))
-        .exclude(provider_category_lower__in=settings.FINANCE_INTERNAL_TRANSFER_CATEGORIES)
     )
 
     income = transactions.filter(type=TransactionType.CREDIT).aggregate(total=Sum("amount")).get(
@@ -291,3 +306,130 @@ def snapshot_net_worth(user, snapshot_date: date | None = None) -> NetWorthSnaps
         },
     )
     return snapshot
+
+
+def build_savings_rate_trend(user, year: int, month: int, months: int = 6) -> list[dict]:
+    """Fluxo de caixa mensal dos `months` meses terminando em (year, month),
+    incluido, do mais antigo ao mais recente -- ordem que a tela de revisao usa
+    para desenhar a tendencia.
+    """
+    reference = date_type(year, month, 1)
+    return [
+        build_monthly_cash_flow(user, year=month_date.year, month=month_date.month)
+        for month_date in (add_months(reference, -offset) for offset in reversed(range(months)))
+    ]
+
+
+class CategoryDelta(TypedDict):
+    category: str
+    current_amount: Decimal
+    previous_amount: Decimal
+    delta: Decimal
+
+
+def build_category_deltas_for_month(user, year: int, month: int) -> list[CategoryDelta]:
+    """Gasto por categoria do mes vs. o mes anterior, do maior aumento para o
+    maior corte.
+
+    Mesma exclusao de transferencias internas do fluxo de caixa: fatura de
+    cartao e transferencia entre contas proprias inflam qualquer categoria em
+    que cairem, sem ser gasto real.
+    """
+    current_start = date_type(year, month, 1)
+    current_end = _first_day_of_next_month(current_start)
+    previous_start = add_months(current_start, -1)
+    previous_end = current_start
+
+    def totals_by_category(start: date_type, end: date_type) -> dict[str, Decimal]:
+        start_at = timezone.make_aware(datetime.combine(start, time.min))
+        end_at = timezone.make_aware(datetime.combine(end, time.min))
+        queryset = _exclude_internal_transfers(
+            Transaction.objects.filter(
+                Q(account__connection__user=user) | Q(card__connection__user=user),
+                type=TransactionType.DEBIT,
+                booked_at__gte=start_at,
+                booked_at__lt=end_at,
+            )
+        )
+        rows = queryset.values("category").annotate(total=Sum("amount"))
+        return {(row["category"] or "sem categoria"): row["total"] or Decimal("0") for row in rows}
+
+    current = totals_by_category(current_start, current_end)
+    previous = totals_by_category(previous_start, previous_end)
+
+    deltas: list[CategoryDelta] = []
+    for category in set(current) | set(previous):
+        current_amount = current.get(category, Decimal("0"))
+        previous_amount = previous.get(category, Decimal("0"))
+        deltas.append(
+            {
+                "category": category,
+                "current_amount": current_amount,
+                "previous_amount": previous_amount,
+                "delta": current_amount - previous_amount,
+            }
+        )
+    deltas.sort(key=lambda item: -item["delta"])
+    return deltas
+
+
+def build_monthly_review_summary(user, year: int, month: int) -> dict:
+    """Compoe os dados do ritual de revisao mensal e garante a linha
+    `MonthlyReview` do mes (criada vazia no primeiro acesso, mesmo idiom de
+    `snapshot_net_worth`).
+
+    Patrimonio, tendencia de poupanca e deltas de categoria sao sempre
+    recalculados das tabelas fonte -- so `adjustments`/`completed_at` (input do
+    usuario) persistem no `MonthlyReview` propriamente.
+    """
+    review, _ = MonthlyReview.objects.get_or_create(user=user, year=year, month=month)
+
+    reference_date = date_type(year, month, 1)
+    period_end = _first_day_of_next_month(reference_date)
+
+    current_snapshot = (
+        NetWorthSnapshot.objects.filter(user=user, date__lt=period_end).order_by("-date").first()
+    )
+    previous_snapshot = (
+        NetWorthSnapshot.objects.filter(user=user, date__lt=reference_date)
+        .order_by("-date")
+        .first()
+    )
+    net_worth_delta = (
+        current_snapshot.net_worth - previous_snapshot.net_worth
+        if current_snapshot and previous_snapshot
+        else None
+    )
+
+    savings_rate_trend = build_savings_rate_trend(user, year, month)
+    category_deltas = build_category_deltas_for_month(user, year, month)
+
+    achievements = []
+    current_flow = savings_rate_trend[-1]
+    averages = build_recent_month_averages(user, months=3, today=reference_date)
+    if averages["income"] > 0:
+        average_rate = averages["savings"] / averages["income"] * Decimal("100")
+        if current_flow["savings_rate"] > average_rate:
+            achievements.append(
+                "Taxa de poupança do mês ficou acima da média dos últimos 3 meses."
+            )
+
+    # Heuristica de v1: `updated_at` e o unico timestamp que `FinancialGoal` tem
+    # para "quando ficou concluida" -- qualquer outra edicao numa meta ja
+    # concluida a traria de volta para a revisao daquele mes.
+    achieved_goals = FinancialGoal.objects.filter(
+        user=user,
+        status=GoalStatus.ACHIEVED,
+        updated_at__date__gte=reference_date,
+        updated_at__date__lt=period_end,
+    )
+    achievements.extend(f'Meta "{goal.name}" foi concluída este mês.' for goal in achieved_goals)
+
+    return {
+        "review": review,
+        "net_worth_delta": net_worth_delta,
+        "current_net_worth": current_snapshot.net_worth if current_snapshot else None,
+        "savings_rate_trend": savings_rate_trend,
+        "category_deltas": category_deltas,
+        "achievements": achievements,
+    }

@@ -9,29 +9,47 @@
      `background`. O app é claro por design — ver `body` abaixo. */
   color-scheme: light;
 
-  --color-sepia-50: #faf6f1;
-  --color-sepia-100: #f0e6d8;
-  --color-sepia-200: #e0ccb0;
-  --color-sepia-300: #c4a882;
-  --color-sepia-400: #a68b64;
-  --color-sepia-500: #8b7355;
-  --color-sepia-600: #6b5a45;
-  --color-sepia-700: #4a3c2e;
-  --color-sepia-800: #332a20;
-  --color-sepia-900: #1f1a14;
-  --color-sepia-950: #14110c;
+  --color-sepia-50: #fbf7ee;
+  --color-sepia-100: #f5eedd;
+  --color-sepia-200: #e7d9b8;
+  --color-sepia-300: #cfb683;
+  --color-sepia-400: #ad8a54;
+  --color-sepia-500: #85652f;
+  --color-sepia-600: #6b4f26;
+  --color-sepia-700: #4e3a1d;
+  --color-sepia-800: #33261a;
+  --color-sepia-900: #241b10;
+  --color-sepia-950: #160f09;
 }
 
 body {
-  background-color: #faf6f1;
-  color: #1f1a14;
-  font-family: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  background-color: #fbf7ee;
+  color: #241b10;
+  font-family: "Iosevka Nerd Font", Iosevka, ui-monospace, monospace;
+}
+
+h1, h2, h3 {
+  font-family: "Iosevka Nerd Font", Iosevka, ui-monospace, monospace;
 }
 
 a {
-  color: #8b7355;
+  color: #85652f;
 }
 
 a:hover {
-  color: #6b5a45;
+  color: #6b4f26;
+}
+
+/* Régua dupla de contabilidade: marca visualmente um total final (vs. a régua
+   simples de um subtotal). `border-bottom-style: double` já renderiza as duas
+   linhas nativamente, sem markup extra. */
+.ledger-total-rule {
+  border-bottom: 3px double var(--color-sepia-400);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
 }

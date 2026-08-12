@@ -1,10 +1,10 @@
 """Testes de persistencia do relatorio de IA.
 
-`PortfolioReportAPIView.post` gerava o relatorio e so devolvia na resposta --
-nada era gravado, e um refresh de pagina (ou so voltar depois) perdia a analise.
-Cobre tambem o escopo por usuario do historico (`PortfolioReportViewSet`), pelo
-mesmo motivo que qualquer lista escopada por usuario precisa de teste: sem
-`get_queryset` filtrando por `user`, o historico de um vira visivel para outro.
+`PortfolioReportAPIView.post` gera e persiste o relatorio. A partir da mudanca
+para "uma analise por usuario" (`user` como `OneToOneField`), gerar de novo
+("Reanalisar" no frontend) substitui a analise anterior em vez de acumular
+historico -- por isso o foco destes testes e "so existe uma linha por usuario,
+sempre a mais recente", nao mais paginacao/lista.
 """
 
 import pytest
@@ -13,7 +13,6 @@ from rest_framework.test import APIClient
 from apps.finance.models import PortfolioReport
 
 REPORT_URL = "/api/v1/ai/portfolio-report/"
-HISTORY_URL = "/api/v1/ai/portfolio-reports/"
 
 
 class FakeChunk:
@@ -73,7 +72,9 @@ def test_generating_a_report_persists_it(user):
     assert saved.query == "onde estou gastando"
     assert saved.summary == "Tudo certo"
     assert saved.suggestions == ["Tesouro Selic"]
-    assert saved.sources == [{"source_type": "financial_summary", "source_id": "1", "similarity": 1.0}]
+    assert saved.sources == [
+        {"source_type": "financial_summary", "source_id": "1", "similarity": 1.0}
+    ]
     assert response.data["id"] == saved.id
     assert response.data["index"] == {"indexed": 1, "skipped": 0, "removed": 0}
 
@@ -88,61 +89,79 @@ def test_generating_without_a_query_still_persists_the_default_used(user):
 
 
 @pytest.mark.django_db
-def test_history_lists_only_the_current_users_reports(user, other_user):
-    PortfolioReport.objects.create(user=user, summary="meu relatorio")
-    PortfolioReport.objects.create(user=other_user, summary="relatorio do outro")
+def test_reanalyzing_replaces_the_previous_report_instead_of_accumulating(user):
+    """"Reanalisar": a segunda geracao substitui a primeira, nunca acumula."""
+    first = _client(user).post(REPORT_URL, {"query": "primeira pergunta"}, format="json")
 
-    response = _client(user).get(HISTORY_URL)
+    response = _client(user).post(REPORT_URL, {"query": "segunda pergunta"}, format="json")
 
     assert response.status_code == 200
-    summaries = [item["summary"] for item in response.data["results"]]
-    assert summaries == ["meu relatorio"]
+    assert PortfolioReport.objects.filter(user=user).count() == 1
+    saved = PortfolioReport.objects.get(user=user)
+    assert saved.query == "segunda pergunta"
+    # Mesmo id: update_or_create atualiza a linha existente, nao cria outra.
+    assert saved.id == first.data["id"]
 
 
 @pytest.mark.django_db
-def test_history_is_ordered_most_recent_first(user):
-    older = PortfolioReport.objects.create(user=user, summary="mais antigo")
-    newer = PortfolioReport.objects.create(user=user, summary="mais novo")
+def test_get_returns_the_persisted_report(user):
+    _client(user).post(REPORT_URL, {"query": "onde estou gastando"}, format="json")
 
-    response = _client(user).get(HISTORY_URL)
+    response = _client(user).get(REPORT_URL)
 
-    ids = [item["id"] for item in response.data["results"]]
-    assert ids == [newer.id, older.id]
+    assert response.status_code == 200
+    assert response.data["query"] == "onde estou gastando"
+    # `index` so existe na resposta de geracao (POST), nao no relatorio persistido.
+    assert "index" not in response.data
 
 
 @pytest.mark.django_db
-def test_history_requires_authentication():
-    response = APIClient().get(HISTORY_URL)
+def test_get_returns_404_when_nothing_was_generated_yet(user):
+    response = _client(user).get(REPORT_URL)
+
+    assert response.status_code == 404
+
+
+@pytest.mark.django_db
+def test_get_only_returns_the_current_users_report(user, other_user):
+    PortfolioReport.objects.create(user=other_user, summary="relatorio do outro")
+
+    response = _client(user).get(REPORT_URL)
+
+    assert response.status_code == 404
+
+
+@pytest.mark.django_db
+def test_get_requires_authentication():
+    response = APIClient().get(REPORT_URL)
 
     assert response.status_code in (401, 403)
 
 
 @pytest.mark.django_db
-def test_deleting_a_report_removes_it(user):
-    report = PortfolioReport.objects.create(user=user, summary="para apagar")
+def test_deleting_the_report_removes_it(user):
+    PortfolioReport.objects.create(user=user, summary="para apagar")
 
-    response = _client(user).delete(f"{HISTORY_URL}{report.id}/")
+    response = _client(user).delete(REPORT_URL)
 
     assert response.status_code == 204
-    assert not PortfolioReport.objects.filter(id=report.id).exists()
+    assert not PortfolioReport.objects.filter(user=user).exists()
 
 
 @pytest.mark.django_db
-def test_cannot_delete_another_users_report(user, other_user):
-    report = PortfolioReport.objects.create(user=other_user, summary="do outro")
+def test_deleting_does_not_affect_another_users_report(user, other_user):
+    other_report = PortfolioReport.objects.create(user=other_user, summary="do outro")
 
-    response = _client(user).delete(f"{HISTORY_URL}{report.id}/")
+    response = _client(user).delete(REPORT_URL)
 
-    # `get_queryset` ja filtra por `user`: fora do escopo, o objeto nem existe
-    # do ponto de vista do viewset, entao 404 e nao 403.
+    # Nao ha relatorio do proprio usuario para apagar -- 404, e o do outro
+    # usuario continua intacto (o filtro por `user` nem chega a ve-lo).
     assert response.status_code == 404
-    assert PortfolioReport.objects.filter(id=report.id).exists()
+    assert PortfolioReport.objects.filter(id=other_report.id).exists()
 
 
 @pytest.mark.django_db
-def test_delete_requires_authentication(other_user):
-    report = PortfolioReport.objects.create(user=other_user, summary="qualquer")
-
-    response = APIClient().delete(f"{HISTORY_URL}{report.id}/")
+def test_delete_requires_authentication():
+    response = APIClient().delete(REPORT_URL)
 
     assert response.status_code in (401, 403)

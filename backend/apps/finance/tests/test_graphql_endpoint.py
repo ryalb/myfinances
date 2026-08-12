@@ -123,6 +123,8 @@ def test_the_dashboard_queries_all_resolve_over_http(csrf_client, user, connecti
         "financialFreedomProjection": "{ financialFreedomProjection { currentNetWorth } }",
         "subscriptionOverview": "{ subscriptionOverview { monthlyRecurringTotal } }",
         "alerts": "{ alerts { kind severity } }",
+        "futureProjection": "{ futureProjection { currentNetWorth } }",
+        "financialHealthScore": "{ financialHealthScore { score } }",
     }
 
     for name, query in queries.items():

@@ -59,7 +59,7 @@ const uiStore = useUiStore()
       <article
         v-for="investment in investments"
         :key="investment.id"
-        class="rounded-xl border border-sepia-200 bg-white p-5 shadow-sm"
+        class="rounded-lg border border-sepia-200 bg-white p-5 shadow-sm"
       >
         <div class="flex items-start justify-between">
           <div>
@@ -68,7 +68,7 @@ const uiStore = useUiStore()
               {{ investment.kind }}
             </span>
           </div>
-          <p :class="['text-right text-lg font-bold text-sepia-900', uiStore.isFinancialValueBlurred ? 'blur-sm select-none' : '']">
+          <p :class="['text-right font-mono text-lg font-bold text-sepia-900', uiStore.isFinancialValueBlurred ? 'blur-sm select-none' : '']">
             {{
               formatBRL(
                 latestPositions.find(p => p.investment === investment.id)?.market_value || 0

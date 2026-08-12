@@ -8,9 +8,11 @@ from .models import (
     Connection,
     FinancialGoal,
     FinancialInstitution,
+    FutureProjectionReport,
     Identity,
     Investment,
     InvestmentPosition,
+    MonthlyReview,
     NetWorthSnapshot,
     PensionPlan,
     PortfolioReport,
@@ -160,6 +162,22 @@ class PortfolioReportSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class FutureProjectionReportSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = FutureProjectionReport
+        fields = (
+            "id",
+            "projection",
+            "narrative",
+            "leverage_explanation",
+            "goal_commentary",
+            "disclaimer",
+            "sources",
+            "created_at",
+        )
+        read_only_fields = fields
+
+
 class FinancialSummarySerializer(serializers.Serializer):
     assets = serializers.DecimalField(max_digits=16, decimal_places=2)
     liabilities = serializers.DecimalField(max_digits=16, decimal_places=2)
@@ -176,6 +194,33 @@ class MonthlyCashFlowSerializer(serializers.Serializer):
     expenses = serializers.DecimalField(max_digits=16, decimal_places=2)
     savings = serializers.DecimalField(max_digits=16, decimal_places=2)
     savings_rate = serializers.DecimalField(max_digits=10, decimal_places=2)
+
+
+class MonthlyReviewSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MonthlyReview
+        fields = ("id", "year", "month", "adjustments", "completed_at", "created_at", "updated_at")
+        read_only_fields = ("id", "year", "month", "created_at", "updated_at")
+
+
+class CategoryDeltaSerializer(serializers.Serializer):
+    category = serializers.CharField()
+    current_amount = serializers.DecimalField(max_digits=16, decimal_places=2)
+    previous_amount = serializers.DecimalField(max_digits=16, decimal_places=2)
+    delta = serializers.DecimalField(max_digits=16, decimal_places=2)
+
+
+class MonthlyReviewSummarySerializer(serializers.Serializer):
+    review = MonthlyReviewSerializer()
+    net_worth_delta = serializers.DecimalField(
+        max_digits=16, decimal_places=2, allow_null=True
+    )
+    current_net_worth = serializers.DecimalField(
+        max_digits=16, decimal_places=2, allow_null=True
+    )
+    savings_rate_trend = MonthlyCashFlowSerializer(many=True)
+    category_deltas = CategoryDeltaSerializer(many=True)
+    achievements = serializers.ListField(child=serializers.CharField())
 
 
 class RegisterSerializer(serializers.Serializer):

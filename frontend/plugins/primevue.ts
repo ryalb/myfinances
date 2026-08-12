@@ -6,17 +6,17 @@ import PrimeVue from "primevue/config"
 // preencher botão, foco, seleção e destaque; sem sobrescrever, tudo isso sai no
 // emerald default dele e briga com o tema.
 const SEPIA = {
-  50: "#faf6f1",
-  100: "#f0e6d8",
-  200: "#e0ccb0",
-  300: "#c4a882",
-  400: "#a68b64",
-  500: "#8b7355",
-  600: "#6b5a45",
-  700: "#4a3c2e",
-  800: "#332a20",
-  900: "#1f1a14",
-  950: "#14110c",
+  50: "#fbf7ee",
+  100: "#f5eedd",
+  200: "#e7d9b8",
+  300: "#cfb683",
+  400: "#ad8a54",
+  500: "#85652f",
+  600: "#6b4f26",
+  700: "#4e3a1d",
+  800: "#33261a",
+  900: "#241b10",
+  950: "#160f09",
 }
 
 const SepiaAura = definePreset(Aura, {

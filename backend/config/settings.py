@@ -116,6 +116,12 @@ FINANCE_INTERNAL_TRANSFER_CATEGORIES = [
     if c.strip()
 ]
 
+# Cenario de estresse do simulador de futuro financeiro (apps.finance.projections):
+# queda de mercado unica + meses sem aporte, ambos no inicio do horizonte. Valores
+# arbitrarios de produto, nao derivados de dado historico -- por isso configuraveis.
+FINANCE_STRESS_MARKET_DROP_PCT = os.getenv("FINANCE_STRESS_MARKET_DROP_PCT", "20")
+FINANCE_STRESS_INCOME_GAP_MONTHS = os.getenv("FINANCE_STRESS_INCOME_GAP_MONTHS", "3")
+
 ROOT_URLCONF = "config.urls"
 
 TEMPLATES = [

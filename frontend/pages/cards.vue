@@ -39,7 +39,7 @@ const uiStore = useUiStore()
       <article
         v-for="card in cards"
         :key="card.id"
-        class="rounded-xl border border-sepia-200 bg-white p-5 shadow-sm"
+        class="rounded-lg border border-sepia-200 bg-white p-5 shadow-sm"
       >
         <div class="flex items-start justify-between">
           <div>
@@ -49,7 +49,7 @@ const uiStore = useUiStore()
               <span v-else>Sem final</span>
             </p>
           </div>
-          <p :class="['text-right text-lg font-bold text-sepia-900', uiStore.isFinancialValueBlurred ? 'blur-sm select-none' : '']">{{ formatBRL(card.current_balance) }}</p>
+          <p :class="['text-right font-mono text-lg font-bold text-sepia-900', uiStore.isFinancialValueBlurred ? 'blur-sm select-none' : '']">{{ formatBRL(card.current_balance) }}</p>
         </div>
         <div class="mt-4 flex items-center justify-between text-sm text-sepia-600">
           <span :class="uiStore.isFinancialValueBlurred ? 'blur-sm select-none' : ''">Limite: {{ formatBRL(card.credit_limit) }}</span>

@@ -40,6 +40,8 @@ EXPECTED_QUERY_FIELDS = {
     "investmentPositions",
     "subscriptionOverview",
     "alerts",
+    "futureProjection",
+    "financialHealthScore",
 }
 
 

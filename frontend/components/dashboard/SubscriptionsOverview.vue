@@ -23,7 +23,7 @@ const totals = computed(() => [
     label: 'Pago no mês',
     value: props.overview.paidThisMonth,
     sublabel: 'Já debitado',
-    color: 'text-emerald-600',
+    color: 'text-azul-700',
   },
   {
     label: 'Pendente no mês',
@@ -37,9 +37,9 @@ const hasNothing = computed(() => props.overview.activeCount === 0)
 </script>
 
 <template>
-  <div class="rounded-xl border border-sepia-200 bg-white p-5 shadow-sm">
+  <div class="rounded-lg border border-sepia-200 bg-white p-5 shadow-sm">
     <div class="mb-4 flex items-center justify-between">
-      <h3 class="text-lg font-semibold text-sepia-900">Assinaturas e Recorrentes</h3>
+      <h3 class="text-base font-semibold text-sepia-900">Assinaturas e Recorrentes</h3>
       <NuxtLink to="/subscriptions" class="text-sm text-sepia-500 hover:text-sepia-700">
         Ver todas
       </NuxtLink>
@@ -53,26 +53,26 @@ const hasNothing = computed(() => props.overview.activeCount === 0)
       <div class="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
         <div v-for="total in totals" :key="total.label">
           <p class="text-xs uppercase tracking-wide text-sepia-400">{{ total.label }}</p>
-          <p :class="['mt-1 text-xl font-bold', total.color, blur]">{{ formatBRL(total.value) }}</p>
+          <p :class="['mt-1 font-mono text-xl font-bold', total.color, blur]">{{ formatBRL(total.value) }}</p>
           <p class="mt-0.5 text-xs text-sepia-500">{{ total.sublabel }}</p>
         </div>
       </div>
 
-      <div v-if="overview.overdue.length" class="mb-5 rounded-lg border border-rose-200 bg-rose-50 p-4">
+      <div v-if="overview.overdue.length" class="mb-5 rounded-lg border border-vermelho-200 bg-vermelho-50 p-4">
         <div class="mb-2 flex items-center justify-between">
-          <span class="flex items-center gap-2 text-sm font-semibold text-rose-700">
+          <span class="flex items-center gap-2 text-sm font-semibold text-vermelho-700">
             <Icon icon="mdi:alert-circle-outline" class="h-5 w-5" />
             {{ overview.overdue.length }} {{ overview.overdue.length === 1 ? 'pagamento atrasado' : 'pagamentos atrasados' }}
           </span>
-          <span :class="['text-sm font-bold text-rose-700', blur]">{{ formatBRL(overview.overdueTotal) }}</span>
+          <span :class="['font-mono text-sm font-bold text-vermelho-700', blur]">{{ formatBRL(overview.overdueTotal) }}</span>
         </div>
         <ul class="space-y-1">
           <li v-for="item in overview.overdue" :key="`${item.name}-${item.dueDate}`" class="flex items-center justify-between text-sm">
-            <span class="text-rose-800">
+            <span class="text-vermelho-800">
               {{ item.name }}
-              <span class="text-rose-500">· venceu {{ formatDueDate(item.dueDate) }}</span>
+              <span class="text-vermelho-500">· venceu {{ formatDueDate(item.dueDate) }}</span>
             </span>
-            <span :class="['font-medium text-rose-800', blur]">{{ formatBRL(item.amount) }}</span>
+            <span :class="['font-mono font-medium text-vermelho-800', blur]">{{ formatBRL(item.amount) }}</span>
           </li>
         </ul>
       </div>
@@ -92,7 +92,7 @@ const hasNothing = computed(() => props.overview.activeCount === 0)
             </span>
             <span class="flex items-center gap-3">
               <span class="text-sepia-500">{{ formatDueDate(item.dueDate) }}</span>
-              <span :class="['font-medium text-sepia-900', blur]">{{ formatBRL(item.amount) }}</span>
+              <span :class="['font-mono font-medium text-sepia-900', blur]">{{ formatBRL(item.amount) }}</span>
             </span>
           </li>
         </ul>

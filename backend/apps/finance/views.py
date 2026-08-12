@@ -9,7 +9,7 @@ from django.conf import settings
 from django.db.models import Prefetch, Q
 from django.http import StreamingHttpResponse
 from django.utils import timezone
-from rest_framework import mixins, permissions, viewsets
+from rest_framework import permissions, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
@@ -20,6 +20,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 from .consolidation import (
     build_monthly_cash_flow,
     build_monthly_cash_flow_for_range,
+    build_monthly_review_summary,
     build_user_financial_summary,
     snapshot_net_worth,
 )
@@ -37,8 +38,10 @@ from .models import (
     ConnectionStatus,
     FinancialGoal,
     FinancialInstitution,
+    FutureProjectionReport,
     Investment,
     InvestmentPosition,
+    MonthlyReview,
     NetWorthSnapshot,
     PensionPlan,
     PortfolioReport,
@@ -56,9 +59,12 @@ from .serializers import (
     FinancialGoalSerializer,
     FinancialInstitutionSerializer,
     FinancialSummarySerializer,
+    FutureProjectionReportSerializer,
     InvestmentPositionSerializer,
     InvestmentSerializer,
     MonthlyCashFlowSerializer,
+    MonthlyReviewSerializer,
+    MonthlyReviewSummarySerializer,
     PensionPlanSerializer,
     PortfolioReportSerializer,
     RegisterSerializer,
@@ -68,7 +74,7 @@ from .serializers import (
     TransactionSerializer,
 )
 from .services import PluggyClient
-from .tasks import recompute_user_snapshot, sync_connection_data
+from .tasks import _reconcile_subscriptions, recompute_user_snapshot, sync_connection_data
 
 logger = logging.getLogger(__name__)
 
@@ -362,6 +368,45 @@ class NetWorthSnapshotAPIView(APIView):
         return Response({"status": "queued"})
 
 
+class MonthlyReviewAPIView(APIView):
+    """Ritual mensal de revisao financeira.
+
+    GET calcula e devolve o resumo do mes (criando a linha `MonthlyReview` no
+    primeiro acesso, mesmo idiom de `NetWorthSnapshotAPIView.post`). PATCH grava
+    so o que o usuario preenche (`adjustments`, `completed`) -- o resto do
+    resumo nunca e escrita, sempre recalculado.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def _year_month(self, params):
+        today = timezone.localdate()
+        year = int(params.get("year", today.year))
+        month = int(params.get("month", today.month))
+        return year, month
+
+    def get(self, request):
+        year, month = self._year_month(request.query_params)
+        summary = build_monthly_review_summary(request.user, year=year, month=month)
+        return Response(MonthlyReviewSummarySerializer(summary).data)
+
+    def patch(self, request):
+        year, month = self._year_month(request.query_params)
+        review, _ = MonthlyReview.objects.get_or_create(user=request.user, year=year, month=month)
+
+        if "adjustments" in request.data:
+            adjustments = request.data.get("adjustments") or []
+            if not isinstance(adjustments, list) or len(adjustments) > 3:
+                return Response({"error": "Envie até 3 ajustes, em uma lista."}, status=400)
+            review.adjustments = [str(item) for item in adjustments]
+
+        if "completed" in request.data:
+            review.completed_at = timezone.now() if request.data.get("completed") else None
+
+        review.save()
+        return Response(MonthlyReviewSerializer(review).data)
+
+
 class FinancialGoalViewSet(viewsets.ModelViewSet):
     serializer_class = FinancialGoalSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -585,6 +630,23 @@ class SubscriptionViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
+        # Sem isto, uma assinatura nova so ganhava historico no proximo sync
+        # Pluggy ou no beat diario -- o usuario cadastra e ve "sem historico"
+        # mesmo com meses de transacoes que ja deveriam casar. `months_back`
+        # maior aqui (so nesta chamada pontual) backfilla o que o reconcile
+        # diario, de janela fixa e pequena, nunca alcancaria.
+        _reconcile_subscriptions(self.request.user, months_back=12)
+
+    def perform_update(self, serializer):
+        serializer.save()
+        _reconcile_subscriptions(self.request.user, months_back=12)
+
+    @action(detail=False, methods=["post"], url_path="reconcile")
+    def reconcile(self, request):
+        """Reconciliacao manual, sob demanda -- para quando o usuario nao quer
+        esperar o sync Pluggy ou o beat diario para ver o historico atualizado."""
+        _reconcile_subscriptions(request.user, months_back=12)
+        return Response(status=204)
 
 
 class SubscriptionPaymentViewSet(viewsets.ModelViewSet):
@@ -734,7 +796,21 @@ class _PassthroughSink:
 
 
 class PortfolioReportAPIView(APIView):
+    """Analise de portfolio via IA -- uma por usuario, nao um historico.
+
+    GET devolve a analise persistida (404 se o usuario nunca gerou uma). POST
+    gera e substitui a analise anterior ("Reanalisar" no frontend): `update_or_
+    create` em vez de `create`, coerente com `PortfolioReport.user` ser
+    `OneToOneField`. DELETE remove a analise atual.
+    """
+
     permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        report = PortfolioReport.objects.filter(user=request.user).first()
+        if report is None:
+            return Response({"detail": "Nenhuma análise gerada ainda."}, status=404)
+        return Response(PortfolioReportSerializer(report).data)
 
     def post(self, request):
         from .ai_services import AIServiceUnavailable, LLMService, RAGService
@@ -769,19 +845,21 @@ class PortfolioReportAPIView(APIView):
             logger.warning("Relatorio de portfolio indisponivel: %s", exc)
             return Response({"error": str(exc)}, status=503)
 
-        # Persistido para referencia futura: sem isto o relatorio so existia no
-        # estado do frontend, e um refresh de pagina perdia a analise.
-        saved = PortfolioReport.objects.create(
+        # Substitui a analise anterior do usuario -- sem isso o relatorio so
+        # existia no estado do frontend, e um refresh de pagina perdia a analise.
+        saved, _ = PortfolioReport.objects.update_or_create(
             user=request.user,
-            query=query,
-            summary=report.get("summary", ""),
-            projections=report.get("projections", ""),
-            strengths=report.get("strengths", []),
-            weaknesses=report.get("weaknesses", []),
-            adjustments=report.get("adjustments", []),
-            suggestions=report.get("suggestions", []),
-            disclaimer=report.get("disclaimer", ""),
-            sources=report.get("sources", []),
+            defaults={
+                "query": query,
+                "summary": report.get("summary", ""),
+                "projections": report.get("projections", ""),
+                "strengths": report.get("strengths", []),
+                "weaknesses": report.get("weaknesses", []),
+                "adjustments": report.get("adjustments", []),
+                "suggestions": report.get("suggestions", []),
+                "disclaimer": report.get("disclaimer", ""),
+                "sources": report.get("sources", []),
+            },
         )
 
         data = PortfolioReportSerializer(saved).data
@@ -791,18 +869,64 @@ class PortfolioReportAPIView(APIView):
         data["index"] = index_stats
         return Response(data)
 
+    def delete(self, request):
+        deleted, _ = PortfolioReport.objects.filter(user=request.user).delete()
+        if not deleted:
+            return Response({"detail": "Nenhuma análise para excluir."}, status=404)
+        return Response(status=204)
 
-class PortfolioReportViewSet(
-    mixins.ListModelMixin,
-    mixins.RetrieveModelMixin,
-    mixins.DestroyModelMixin,
-    viewsets.GenericViewSet,
-):
-    # Sem create/update: relatorios so nascem via `PortfolioReportAPIView.post`.
-    # Destroy entra para o usuario poder limpar o historico.
-    serializer_class = PortfolioReportSerializer
+
+class FutureProjectionAPIView(APIView):
+    """Narra em pt-BR a simulacao de futuro financeiro (`projections.py`).
+
+    Mesma estrutura de `PortfolioReportAPIView`: RAG + LLM local construidos
+    dentro do try (a checagem de inferencia local levanta no `__init__`), 503 se
+    o Ollama nao estiver disponivel, uma narracao por usuario que "Reanalisar"
+    substitui em vez de acumular historico.
+    """
+
     permission_classes = [permissions.IsAuthenticated]
-    pagination_class = UnboundedCollectionPagination
 
-    def get_queryset(self):
-        return PortfolioReport.objects.filter(user=self.request.user)
+    def get(self, request):
+        report = FutureProjectionReport.objects.filter(user=request.user).first()
+        if report is None:
+            return Response({"detail": "Nenhuma narração gerada ainda."}, status=404)
+        return Response(FutureProjectionReportSerializer(report).data)
+
+    def post(self, request):
+        from .ai_services import AIServiceUnavailable, LLMService, RAGService
+        from .projections import build_future_projection, serialize_future_projection
+
+        try:
+            rag = RAGService()
+            llm = LLMService()
+
+            index_stats = rag.index_user_context(request.user)
+            projection = serialize_future_projection(build_future_projection(request.user))
+            context = rag.retrieve_future_projection_context(request.user)
+            narrative = llm.generate_future_projection_narrative(context, projection)
+        except AIServiceUnavailable as exc:
+            logger.warning("Narracao da simulacao de futuro financeiro indisponivel: %s", exc)
+            return Response({"error": str(exc)}, status=503)
+
+        saved, _ = FutureProjectionReport.objects.update_or_create(
+            user=request.user,
+            defaults={
+                "projection": projection,
+                "narrative": narrative.get("narrative", ""),
+                "leverage_explanation": narrative.get("leverage_explanation", []),
+                "goal_commentary": narrative.get("goal_commentary", []),
+                "disclaimer": narrative.get("disclaimer", ""),
+                "sources": narrative.get("sources", []),
+            },
+        )
+
+        data = FutureProjectionReportSerializer(saved).data
+        data["index"] = index_stats
+        return Response(data)
+
+    def delete(self, request):
+        deleted, _ = FutureProjectionReport.objects.filter(user=request.user).delete()
+        if not deleted:
+            return Response({"detail": "Nenhuma narração para excluir."}, status=404)
+        return Response(status=204)

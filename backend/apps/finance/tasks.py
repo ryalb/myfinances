@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import date as date_type
 from datetime import datetime, time, timedelta
 
@@ -302,13 +303,27 @@ def _candidate_transactions(
     return candidates
 
 
+_NON_ALNUM = re.compile(r"[^a-z0-9]")
+
+
+def _normalize_for_match(text: str) -> str:
+    """Remove espaco/pontuacao antes de comparar nome x descricao.
+
+    O banco manda a descricao com formatacao propria, sem relacao com como o
+    usuario digitou o nome da assinatura -- "Google Youtube Premium" chega como
+    "Google Youtubepremium" (sem o espaco), e "Claro Flex" chega junto com um
+    prefixo tipo "Dm*". Comparar string crua faz esses casos nunca casarem.
+    """
+    return _NON_ALNUM.sub("", text.lower())
+
+
 def _best_match(
     sub: Subscription,
     due_date: date_type,
     candidates: list[Transaction],
     used_transaction_ids: set[int],
 ) -> Transaction | None:
-    name = (sub.name or "").lower()
+    name = _normalize_for_match(sub.name or "")
     category = (sub.category or "").lower()
 
     matches = [
@@ -325,8 +340,8 @@ def _best_match(
                 name
                 and (tx.description or "")
                 and (
-                    name in (tx.description or "").lower()
-                    or (tx.description or "").lower() in name
+                    name in _normalize_for_match(tx.description or "")
+                    or _normalize_for_match(tx.description or "") in name
                 )
             )
             or (category and category in (tx.category or "").lower())
@@ -352,11 +367,15 @@ def _best_match(
     )
 
 
-def _reconcile_subscriptions(user) -> None:
+def _reconcile_subscriptions(user, *, months_back: int = 3, months_forward: int = 6) -> None:
     """Reconcile subscription payments against transactions.
 
     Runs on every sync, so it resolves the whole window in a fixed number of
     queries instead of one per (subscription, month) pair.
+
+    `months_back` fica pequeno por padrao (custo fixo, roda todo dia para todo
+    usuario). Uma assinatura recem-criada usa um valor maior para casar de
+    primeira com o historico de transacoes que ja existia antes dela.
     """
     subscriptions = list(Subscription.objects.filter(user=user, is_active=True))
     if not subscriptions:
@@ -364,7 +383,7 @@ def _reconcile_subscriptions(user) -> None:
 
     today = timezone.localdate()
     months: list[tuple[int, int]] = []
-    for month_offset in range(-3, 7):
+    for month_offset in range(-months_back, months_forward + 1):
         year = today.year
         month = today.month + month_offset
         while month <= 0:
