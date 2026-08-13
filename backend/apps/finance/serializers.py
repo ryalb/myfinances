@@ -1,11 +1,16 @@
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
 
+from .investment_categories import classify_display_category
 from .models import (
     Account,
+    AssetClass,
+    BudgetBucket,
+    BudgetBucketTarget,
     Card,
     CategorizationRule,
     Connection,
+    FinanceTag,
     FinancialGoal,
     FinancialInstitution,
     FutureProjectionReport,
@@ -15,7 +20,9 @@ from .models import (
     MonthlyReview,
     NetWorthSnapshot,
     PensionPlan,
+    PortfolioBuilderReport,
     PortfolioReport,
+    PortfolioTarget,
     Subscription,
     SubscriptionPayment,
     SyncJob,
@@ -102,6 +109,7 @@ class TransactionSerializer(serializers.ModelSerializer):
             "currency",
             "type",
             "category",
+            "category_is_manual",
             "provider_category",
             "is_internal_transfer",
             "booked_at",
@@ -117,6 +125,18 @@ class TransactionSerializer(serializers.ModelSerializer):
         holder = obj.account or obj.card
         connection = holder.connection if holder else None
         return connection.institution.name if connection else ""
+
+
+class TransactionCategoryInputSerializer(serializers.Serializer):
+    """Corpo do PATCH de `/transactions/{id}/category/` -- edicao manual."""
+
+    category = serializers.CharField(max_length=100)
+
+    def validate_category(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("Categoria não pode ser vazia.")
+        return value
 
 
 class NetWorthSnapshotSerializer(serializers.ModelSerializer):
@@ -178,6 +198,43 @@ class FutureProjectionReportSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class PortfolioTargetSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PortfolioTarget
+        fields = ("id", "asset_class", "target_percentage", "created_at", "updated_at")
+        read_only_fields = fields
+
+
+class PortfolioTargetInputSerializer(serializers.Serializer):
+    """Uma linha do PUT em lote de `/api/v1/portfolio-targets/`.
+
+    So valida a forma de cada linha -- a soma das linhas (~100%) e checada pela
+    view sobre o lote inteiro, nao aqui: uma unica linha nunca soma 100% sozinha.
+    """
+
+    asset_class = serializers.ChoiceField(choices=AssetClass.choices)
+    target_percentage = serializers.DecimalField(
+        max_digits=5, decimal_places=2, min_value=0, max_value=100
+    )
+
+
+class BudgetBucketTargetSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = BudgetBucketTarget
+        fields = ("id", "bucket", "target_percentage", "created_at", "updated_at")
+        read_only_fields = fields
+
+
+class BudgetBucketTargetInputSerializer(serializers.Serializer):
+    """Uma linha do PUT em lote de `/api/v1/budget-bucket-targets/` -- mesmo
+    papel de `PortfolioTargetInputSerializer`, taxonomia do otimizador."""
+
+    bucket = serializers.ChoiceField(choices=BudgetBucket.choices)
+    target_percentage = serializers.DecimalField(
+        max_digits=5, decimal_places=2, min_value=0, max_value=100
+    )
+
+
 class FinancialSummarySerializer(serializers.Serializer):
     assets = serializers.DecimalField(max_digits=16, decimal_places=2)
     liabilities = serializers.DecimalField(max_digits=16, decimal_places=2)
@@ -194,6 +251,23 @@ class MonthlyCashFlowSerializer(serializers.Serializer):
     expenses = serializers.DecimalField(max_digits=16, decimal_places=2)
     savings = serializers.DecimalField(max_digits=16, decimal_places=2)
     savings_rate = serializers.DecimalField(max_digits=10, decimal_places=2)
+
+
+class CategoryTotalSerializer(serializers.Serializer):
+    category = serializers.CharField()
+    total = serializers.DecimalField(max_digits=16, decimal_places=2)
+    count = serializers.IntegerField()
+    percentage = serializers.DecimalField(max_digits=5, decimal_places=2)
+
+
+class TransactionStatsSerializer(serializers.Serializer):
+    total_income = serializers.DecimalField(max_digits=16, decimal_places=2)
+    total_expenses = serializers.DecimalField(max_digits=16, decimal_places=2)
+    balance = serializers.DecimalField(max_digits=16, decimal_places=2)
+    transaction_count = serializers.IntegerField()
+    average_expense = serializers.DecimalField(max_digits=16, decimal_places=2)
+    expense_categories = CategoryTotalSerializer(many=True)
+    income_categories = CategoryTotalSerializer(many=True)
 
 
 class MonthlyReviewSerializer(serializers.ModelSerializer):
@@ -306,6 +380,62 @@ class UserScopedPrimaryKeyRelatedField(serializers.PrimaryKeyRelatedField):
         return queryset.filter(**{self.user_path: user})
 
 
+class FinanceTagSerializer(serializers.ModelSerializer):
+    account = UserScopedPrimaryKeyRelatedField(
+        queryset=Account.objects.all(),
+        user_path="connection__user",
+        required=False,
+        allow_null=True,
+    )
+    investment = UserScopedPrimaryKeyRelatedField(
+        queryset=Investment.objects.all(),
+        user_path="connection__user",
+        required=False,
+        allow_null=True,
+    )
+    goal = UserScopedPrimaryKeyRelatedField(
+        queryset=FinancialGoal.objects.all(), user_path="user", required=False, allow_null=True
+    )
+
+    class Meta:
+        model = FinanceTag
+        fields = (
+            "id",
+            "kind",
+            "value",
+            "account",
+            "investment",
+            "goal",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("created_at", "updated_at")
+
+    def validate(self, attrs):
+        targets = [attrs.get(field) for field in ("account", "investment", "goal")]
+        if sum(1 for target in targets if target is not None) != 1:
+            raise serializers.ValidationError(
+                "Informe exatamente um de: account, investment, goal."
+            )
+        return attrs
+
+
+class PortfolioBuilderReportSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PortfolioBuilderReport
+        fields = (
+            "id",
+            "drift",
+            "guidance",
+            "rebalancing_actions",
+            "common_mistakes",
+            "disclaimer",
+            "sources",
+            "created_at",
+        )
+        read_only_fields = fields
+
+
 class SubscriptionPaymentSerializer(serializers.ModelSerializer):
     subscription = UserScopedPrimaryKeyRelatedField(
         queryset=Subscription.objects.all(), user_path="user"
@@ -408,6 +538,13 @@ class CardSerializer(serializers.ModelSerializer):
 
 
 class InvestmentSerializer(serializers.ModelSerializer):
+    # Categoria de exibicao (Renda Fixa/Acoes/FII/...), derivada de kind+code --
+    # ver investment_categories.py. Separada de `AssetClass`/FinanceTag, que e a
+    # taxonomia das metas do Portfolio Builder.
+    display_category = serializers.SerializerMethodField()
+    display_category_label = serializers.SerializerMethodField()
+    display_category_estimated = serializers.SerializerMethodField()
+
     class Meta:
         model = Investment
         fields = (
@@ -417,10 +554,38 @@ class InvestmentSerializer(serializers.ModelSerializer):
             "name",
             "kind",
             "currency",
+            "subtype",
+            "code",
+            "isin",
+            "issuer",
+            "issue_date",
+            "due_date",
+            "rate_type",
+            "tax_exempt",
+            "rate_periodicity",
+            "indexer_additional_info",
+            "display_category",
+            "display_category_label",
+            "display_category_estimated",
             "created_at",
             "updated_at",
         )
-        read_only_fields = ("created_at", "updated_at")
+        read_only_fields = (
+            "created_at",
+            "updated_at",
+            "display_category",
+            "display_category_label",
+            "display_category_estimated",
+        )
+
+    def get_display_category(self, obj):
+        return classify_display_category(obj).key
+
+    def get_display_category_label(self, obj):
+        return classify_display_category(obj).label
+
+    def get_display_category_estimated(self, obj):
+        return classify_display_category(obj).estimated
 
 
 class InvestmentPositionSerializer(serializers.ModelSerializer):
@@ -433,6 +598,16 @@ class InvestmentPositionSerializer(serializers.ModelSerializer):
             "quantity",
             "unit_price",
             "market_value",
+            "last_month_rate",
+            "last_twelve_months_rate",
+            "annual_rate",
+            "fixed_annual_rate",
+            "rate",
+            "amount_profit",
+            "amount_original",
+            "status",
+            "purchase_date",
+            "grace_period_date",
             "created_at",
             "updated_at",
         )

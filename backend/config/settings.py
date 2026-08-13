@@ -122,6 +122,17 @@ FINANCE_INTERNAL_TRANSFER_CATEGORIES = [
 FINANCE_STRESS_MARKET_DROP_PCT = os.getenv("FINANCE_STRESS_MARKET_DROP_PCT", "20")
 FINANCE_STRESS_INCOME_GAP_MONTHS = os.getenv("FINANCE_STRESS_INCOME_GAP_MONTHS", "3")
 
+# Categorias de transacao (normalizadas, pt-BR -- ver domain.CATEGORY_KEYWORDS)
+# tratadas como despesa fixa pelo otimizador de orcamento (apps.finance.budget_
+# buckets). O resto do debito cai em discricionario por default. Assinaturas
+# entram em despesas fixas por um caminho separado (Subscription), nao por
+# categoria -- por isso nao aparecem aqui.
+FINANCE_FIXED_EXPENSE_CATEGORIES = [
+    c.strip()
+    for c in os.getenv("FINANCE_FIXED_EXPENSE_CATEGORIES", "Moradia,Saúde,Educação").split(",")
+    if c.strip()
+]
+
 ROOT_URLCONF = "config.urls"
 
 TEMPLATES = [

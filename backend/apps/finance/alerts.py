@@ -10,11 +10,13 @@ A entrega em tempo real vem de graca: `useRealtimeSync` no frontend chama
 """
 
 from datetime import timedelta
+from decimal import Decimal
 
 from django.utils import timezone
 
-from .consolidation import build_subscription_overview
-from .models import Connection, ConnectionStatus
+from .budget_buckets import build_bucket_drift
+from .consolidation import build_subscription_overview, previous_month_keys
+from .models import BudgetBucketTarget, Connection, ConnectionStatus
 
 # Gravidade em ordem decrescente. O contador no cabecalho mostra os primeiros da
 # lista, entao a ordem importa: aviso informativo antes de conexao quebrada
@@ -28,6 +30,15 @@ UPCOMING_ALERT_DAYS = 7
 # A Pluggy sincroniza sozinha a cada 24h no plano mais lento. Passar disso com
 # folga significa dado velho no dashboard sem nada na tela dizendo isso.
 STALE_SYNC_DAYS = 3
+
+# Bucket do otimizador (Fase 6) abaixo do alvo por quantos meses seguidos para
+# virar alerta. Um mes so e ruido comum (viagem, gasto pontual); dois meses e
+# padrao que vale avisar antes de virar habito.
+BUDGET_BUCKET_ALERT_MONTHS = 2
+
+# Margem de tolerancia (p.p.) antes de considerar "abaixo do alvo" -- sem isto,
+# arredondamento de centavos dispararia o alerta todo mes.
+BUDGET_BUCKET_UNDER_TARGET_MARGIN_PP = Decimal("2")
 
 
 def _alert(kind: str, severity: str, title: str, detail: str, action_path: str) -> dict:
@@ -115,14 +126,66 @@ def _connection_alerts(user, now) -> list[dict]:
     return alerts
 
 
+def _budget_bucket_alerts(user, today) -> list[dict]:
+    """Bucket do otimizador (Fase 6) abaixo do alvo pelos ultimos
+    `BUDGET_BUCKET_ALERT_MONTHS` meses fechados (nunca o mes em andamento, que
+    ainda nao acabou de acontecer).
+
+    Sai cedo se o usuario nunca definiu alvo nenhum -- e o caso da grande
+    maioria hoje, e o custo de `build_bucket_drift` (fluxo de caixa + gasto por
+    categoria + creditos tagueados, por mes) so vale pagar para quem de fato
+    usa a funcionalidade.
+    """
+    if not BudgetBucketTarget.objects.filter(user=user).exists():
+        return []
+
+    months = previous_month_keys(today, BUDGET_BUCKET_ALERT_MONTHS)
+    drift_by_month = [
+        {row["bucket"]: row for row in build_bucket_drift(user, year=year, month=month)}
+        for year, month in months
+    ]
+
+    targets_defined = {
+        bucket
+        for bucket, row in drift_by_month[0].items()
+        if row["target_percentage"] > 0
+    }
+
+    alerts = []
+    for bucket in targets_defined:
+        under_target_every_month = all(
+            month_rows[bucket]["drift_pp"] < -BUDGET_BUCKET_UNDER_TARGET_MARGIN_PP
+            for month_rows in drift_by_month
+        )
+        if not under_target_every_month:
+            continue
+        latest = drift_by_month[0][bucket]
+        alerts.append(
+            _alert(
+                kind="budget_bucket_under_target",
+                severity="warning",
+                title=f"{latest['label']} abaixo do alvo há {BUDGET_BUCKET_ALERT_MONTHS} meses",
+                detail=(
+                    f"Alvo {latest['target_percentage']:.0f}% da renda, realizado "
+                    f"{latest['actual_percentage']:.0f}% no último mês fechado."
+                ),
+                action_path="/optimizer",
+            )
+        )
+    return alerts
+
+
 def build_user_alerts(user) -> list[dict]:
     """Alertas do usuario, do mais grave para o menos.
 
     Custo fixo: as assinaturas saem de `build_subscription_overview` (3 queries) e
-    as conexoes de uma consulta so, com a instituicao no `select_related`.
+    as conexoes de uma consulta so, com a instituicao no `select_related`. Buckets
+    de orcamento so custam algo para quem de fato definiu um alvo.
     """
     now = timezone.now()
-    alerts = _subscription_alerts(user, today=timezone.localdate())
+    today = timezone.localdate()
+    alerts = _subscription_alerts(user, today=today)
     alerts.extend(_connection_alerts(user, now=now))
+    alerts.extend(_budget_bucket_alerts(user, today=today))
     alerts.sort(key=lambda alert: ALERT_SEVERITY_ORDER.index(alert["severity"]))
     return alerts

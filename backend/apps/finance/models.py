@@ -162,6 +162,10 @@ class Transaction(TimeStampedModel):
     currency = models.CharField(max_length=3, default="BRL")
     type = models.CharField(max_length=10, choices=TransactionType.choices)
     category = models.CharField(max_length=100, blank=True)
+    # Marca uma escolha explicita do usuario na tela de transacoes -- sem isso,
+    # o proximo sync (a Pluggy reenvia a mesma transacao em updates) ou um
+    # "reaplicar regras" recalcularia e apagaria silenciosamente a escolha.
+    category_is_manual = models.BooleanField(default=False)
     provider_category = models.CharField(max_length=100, blank=True)
     booked_at = models.DateTimeField()
     # Campos crus da Pluggy sem uso hoje na tela, mas uteis para o relatorio de
@@ -341,6 +345,132 @@ class MonthlyReview(TimeStampedModel):
 
     def __str__(self) -> str:
         return f"{self.user_id}:{self.year}-{self.month:02d}"
+
+
+class AssetClass(models.TextChoices):
+    FIXED_INCOME = "fixed_income", "Renda fixa"
+    EQUITY_BR = "equity_br", "Ações Brasil"
+    EQUITY_INTL = "equity_intl", "Ações internacional"
+    CASH_RESERVE = "cash_reserve", "Reserva de caixa"
+    PENSION = "pension", "Previdência"
+
+
+class PortfolioTarget(TimeStampedModel):
+    """Alocacao-alvo definida pelo usuario, por classe de ativo.
+
+    `allocation.build_allocation_drift` compara isto com a alocacao real
+    (calculada de `Investment`/`PensionPlan`/`Account` tagueada) -- o alvo nunca
+    muda sozinho, so por edicao explicita do usuario.
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="portfolio_targets"
+    )
+    asset_class = models.CharField(max_length=20, choices=AssetClass.choices)
+    target_percentage = models.DecimalField(max_digits=5, decimal_places=2)
+
+    class Meta:
+        unique_together = ("user", "asset_class")
+
+    def __str__(self) -> str:
+        return f"{self.user_id}:{self.asset_class}={self.target_percentage}%"
+
+
+class FinanceTagKind(models.TextChoices):
+    ASSET_CLASS = "asset_class", "Classe de ativo"
+    BUDGET_BUCKET = "budget_bucket", "Bucket de orçamento"
+
+
+class FinanceTag(TimeStampedModel):
+    """Papel atribuido pelo usuario a uma conta, investimento ou meta.
+
+    Tres FKs nullable e mutuamente exclusivas (uma por linha) em vez de
+    `GenericForeignKey` -- mesmo idiom de `Transaction.account`/`Transaction.card`,
+    aplicado aqui a tres alvos possiveis em vez de dois. `kind` decide o
+    dominio de `value`: classe de ativo (`AssetClass`, Fase 4) ou bucket de
+    orcamento (Fase 6); o vocabulario de `value` nao e validado aqui de
+    proposito, para o mesmo model servir aos dois sem acoplar `allocation.py` a
+    `budget_buckets.py`.
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="finance_tags"
+    )
+    kind = models.CharField(max_length=20, choices=FinanceTagKind.choices)
+    value = models.CharField(max_length=50)
+    account = models.ForeignKey(
+        Account, on_delete=models.CASCADE, related_name="finance_tags", null=True, blank=True
+    )
+    investment = models.ForeignKey(
+        Investment, on_delete=models.CASCADE, related_name="finance_tags", null=True, blank=True
+    )
+    goal = models.ForeignKey(
+        FinancialGoal, on_delete=models.CASCADE, related_name="finance_tags", null=True, blank=True
+    )
+
+    class Meta:
+        constraints = [
+            # Uma tag por alvo e por dominio (`kind`): a mesma conta pode ter
+            # uma tag de classe de ativo e, na Fase 6, uma tag de bucket de
+            # orcamento -- mas nao duas do mesmo dominio.
+            models.UniqueConstraint(
+                fields=["kind", "account"],
+                condition=models.Q(account__isnull=False),
+                name="unique_tag_per_account_and_kind",
+            ),
+            models.UniqueConstraint(
+                fields=["kind", "investment"],
+                condition=models.Q(investment__isnull=False),
+                name="unique_tag_per_investment_and_kind",
+            ),
+            models.UniqueConstraint(
+                fields=["kind", "goal"],
+                condition=models.Q(goal__isnull=False),
+                name="unique_tag_per_goal_and_kind",
+            ),
+            models.CheckConstraint(
+                # Exatamente um alvo preenchido -- nunca zero, nunca mais de um.
+                condition=(
+                    models.Q(account__isnull=False, investment__isnull=True, goal__isnull=True)
+                    | models.Q(account__isnull=True, investment__isnull=False, goal__isnull=True)
+                    | models.Q(account__isnull=True, investment__isnull=True, goal__isnull=False)
+                ),
+                name="finance_tag_exactly_one_target",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        target = self.account_id or self.investment_id or self.goal_id
+        return f"{self.kind}:{self.value} -> {target}"
+
+
+class BudgetBucket(models.TextChoices):
+    FIXED_EXPENSES = "fixed_expenses", "Despesas fixas"
+    INVESTMENTS = "investments", "Investimentos"
+    EMERGENCY_FUND = "emergency_fund", "Reserva de emergência"
+    GOALS = "goals", "Metas"
+    DISCRETIONARY = "discretionary", "Discricionário"
+
+
+class BudgetBucketTarget(TimeStampedModel):
+    """Alvo do otimizador de orcamento: % da renda mensal por bucket.
+
+    Mesmo shape de `PortfolioTarget` (Fase 4), taxonomia propria. `budget_buckets.
+    build_bucket_drift` compara isto com o realizado do mes (`FinanceTag` marca
+    quais contas alimentam cada bucket) -- guidance-only, nunca move dinheiro.
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="budget_bucket_targets"
+    )
+    bucket = models.CharField(max_length=20, choices=BudgetBucket.choices)
+    target_percentage = models.DecimalField(max_digits=5, decimal_places=2)
+
+    class Meta:
+        unique_together = ("user", "bucket")
+
+    def __str__(self) -> str:
+        return f"{self.user_id}:{self.bucket}={self.target_percentage}%"
 
 
 class SyncJobStatus(models.TextChoices):
@@ -564,6 +694,34 @@ class FutureProjectionReport(TimeStampedModel):
     narrative = models.TextField(blank=True)
     leverage_explanation = models.JSONField(default=list, blank=True)
     goal_commentary = models.JSONField(default=list, blank=True)
+    disclaimer = models.TextField(blank=True)
+    sources = models.JSONField(default=list, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"{self.user_id}:{self.created_at:%Y-%m-%d %H:%M}"
+
+
+class PortfolioBuilderReport(TimeStampedModel):
+    """Relatorio de IA gerado por `LLMService.generate_portfolio_builder_guidance`.
+
+    Terceira ocorrencia do padrao "uma analise por usuario, reanalisar substitui"
+    (`PortfolioReport`, `FutureProjectionReport`). Payload por classe de ativo
+    (alvo x atual x desvio) nao cabe no formato de listas livres do
+    `PortfolioReport`, mesma razao de `FutureProjectionReport` ter model proprio.
+    """
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="portfolio_builder_report",
+    )
+    drift = models.JSONField(default=list, blank=True)
+    guidance = models.TextField(blank=True)
+    rebalancing_actions = models.JSONField(default=list, blank=True)
+    common_mistakes = models.JSONField(default=list, blank=True)
     disclaimer = models.TextField(blank=True)
     sources = models.JSONField(default=list, blank=True)
 

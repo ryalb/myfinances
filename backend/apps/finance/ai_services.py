@@ -13,7 +13,11 @@ from django.db import transaction as db_transaction
 from django.utils import timezone
 from pgvector.django import CosineDistance
 
-from .consolidation import build_subscription_overview, build_user_financial_summary
+from .consolidation import (
+    build_subscription_overview,
+    build_user_financial_summary,
+    latest_positions_by_investment,
+)
 from .models import (
     EMBEDDING_DIMENSIONS,
     Account,
@@ -64,6 +68,11 @@ REPORT_LIST_FIELDS = ("strengths", "weaknesses", "adjustments", "suggestions")
 # em si vem de `projections.build_future_projection`, a LLM so explica.
 PROJECTION_TEXT_FIELDS = ("narrative",)
 PROJECTION_LIST_FIELDS = ("leverage_explanation", "goal_commentary")
+
+# Mesmo contrato, para a orientacao Bogleheads do construtor de portfolio -- os
+# numeros vem de `allocation.build_allocation_drift`, a LLM so recomenda.
+GUIDANCE_TEXT_FIELDS = ("guidance",)
+GUIDANCE_LIST_FIELDS = ("rebalancing_actions", "common_mistakes")
 
 # Hosts considerados locais. `ollama` e o nome do servico no docker-compose.
 LOCAL_INFERENCE_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "0.0.0.0", "ollama"})
@@ -176,6 +185,19 @@ def normalize_projection_narrative(raw) -> dict:
         narrative[key] = _as_list(source.get(key))
     narrative["disclaimer"] = REPORT_DISCLAIMER
     return narrative
+
+
+def normalize_portfolio_guidance(raw) -> dict:
+    """Mesma normalizacao de `normalize_report`, para o contrato da orientacao
+    Bogleheads do construtor de portfolio (chaves e formato diferentes)."""
+    source = raw if isinstance(raw, dict) else {}
+    guidance: dict[str, object] = {}
+    for key in GUIDANCE_TEXT_FIELDS:
+        guidance[key] = _as_text(source.get(key))
+    for key in GUIDANCE_LIST_FIELDS:
+        guidance[key] = _as_list(source.get(key))
+    guidance["disclaimer"] = REPORT_DISCLAIMER
+    return guidance
 
 
 @dataclass(frozen=True)
@@ -326,16 +348,15 @@ def _build_investments_document(user) -> Document | None:
     if not investments:
         return None
 
-    # Uma passagem, ordenada por data: a primeira posicao vista por investimento
-    # e a mais antiga, a ultima e a mais recente. Da pra calcular variacao de
-    # cota sem uma segunda query.
+    # A primeira posicao vista por investimento e a mais antiga (para o calculo
+    # de variacao de cota abaixo); a mais recente vem de `latest_positions_by_
+    # investment`, compartilhada com `allocation.build_actual_allocation`.
     earliest: dict[int, InvestmentPosition] = {}
-    latest: dict[int, InvestmentPosition] = {}
     for position in InvestmentPosition.objects.filter(
         investment__connection__user=user
     ).order_by("investment_id", "as_of_date"):
         earliest.setdefault(position.investment_id, position)
-        latest[position.investment_id] = position
+    latest = latest_positions_by_investment(user)
 
     lines = [f"# Investimentos ({len(investments)})"]
     totals_by_kind: dict[str, Decimal] = {}
@@ -545,6 +566,42 @@ def _build_future_projection_document(user) -> Document | None:
         source_id=str(user.pk),
         content="\n".join(lines),
         metadata={"horizons": data["horizons"]},
+    )
+
+
+def _render_allocation_lines(drift: list[dict]) -> list[str]:
+    """Linhas em pt-BR do desvio de alocacao, uma por classe de ativo.
+
+    Reaproveitada pelo documento indexavel (`_build_allocation_document`) e pelo
+    prompt de orientacao (`LLMService.generate_portfolio_builder_guidance`),
+    mesmo motivo de `_render_projection_lines`: os dois descrevem os mesmos
+    numeros, um indexado e o outro direto no prompt.
+    """
+    lines = []
+    for row in drift:
+        lines.append(
+            f"- {row['label']}: alvo {row['target_percentage']:.1f}%, atual "
+            f"{row['actual_percentage']:.1f}% ({_format_amount(row['actual_amount'])}), "
+            f"desvio {row['drift_pp']:+.1f} p.p."
+        )
+    return lines
+
+
+def _build_allocation_document(user) -> Document | None:
+    from .allocation import build_allocation_drift
+
+    drift = build_allocation_drift(user)
+    if not drift:
+        return None
+    lines = [
+        "# Alocacao de portfolio (alvo x atual)",
+        *_render_allocation_lines(drift),
+    ]
+    return Document(
+        source_type="portfolio_allocation",
+        source_id=str(user.pk),
+        content="\n".join(lines),
+        metadata={"count": len(drift)},
     )
 
 
@@ -766,6 +823,7 @@ def build_user_documents(user) -> list[Document]:
         _build_identity_document,
         _build_goals_document,
         _build_future_projection_document,
+        _build_allocation_document,
         _build_subscriptions_document,
         _build_rules_document,
         _build_sync_history_document,
@@ -986,6 +1044,28 @@ class RAGService:
                 context.append({"chunk": anchor[0].chunk, "similarity": 1.0})
         return context
 
+    def retrieve_portfolio_builder_context(self, user) -> list[dict]:
+        """Contexto para a orientacao Bogleheads do construtor de portfolio.
+
+        Mesmo raciocinio de `retrieve_future_projection_context`: sem busca por
+        similaridade, so os dominios qualitativos que ajudam a LLM a explicar o
+        desvio de alocacao -- a propria alocacao, investimentos (para citar
+        concentracao por tipo) e o resumo patrimonial.
+        """
+        anchor_types = (SUMMARY_SOURCE_TYPE, "portfolio_allocation", "investments")
+        context = []
+        for source_type in anchor_types:
+            anchor = list(
+                Embedding.objects.filter(
+                    chunk__user=user,
+                    chunk__status=DocumentChunkStatus.INDEXED,
+                    chunk__source_type=source_type,
+                ).select_related("chunk")[:1]
+            )
+            if anchor:
+                context.append({"chunk": anchor[0].chunk, "similarity": 1.0})
+        return context
+
 
 class LLMService:
     def __init__(self) -> None:
@@ -1135,3 +1215,79 @@ class LLMService:
             if item.get("chunk")
         ]
         return narrative
+
+    def generate_portfolio_builder_guidance(
+        self, context_chunks: list[dict], drift: list[dict]
+    ) -> dict:
+        """Orientacao Bogleheads em pt-BR sobre um desvio de alocacao ja calculado.
+
+        `drift` vem de `allocation.build_allocation_drift` -- os numeros entram no
+        prompt diretamente, mesmo raciocinio de `generate_future_projection_narrative`.
+        Reaproveita literalmente as regras de "so dados fornecidos" e "classe de
+        fundo, nunca ticker" de `generate_portfolio_report`: nenhuma das duas
+        narracoes tem acesso a dado de mercado atualizado.
+        """
+        context_text = "\n\n".join(
+            f"[Fonte: {item['chunk'].source_type}/{item['chunk'].source_id}]\n"
+            f"{item['chunk'].content}"
+            for item in context_chunks
+            if item.get("chunk")
+        )
+        drift_text = "\n".join(_render_allocation_lines(drift))
+
+        prompt = (
+            "Você é um consultor de investimentos no estilo Bogleheads (baixo custo, "
+            "diversificação ampla, buy-and-hold). Os números de alocação abaixo já "
+            "foram calculados por código determinístico; sua tarefa é apenas explicar "
+            "o desvio e recomendar ajustes, nunca recalcular os números.\n\n"
+            "Regras obrigatórias:\n"
+            "- Use apenas os números abaixo e o contexto fornecido; não invente valores.\n"
+            "- Formate valores monetários no padrão brasileiro (R$ 1.234,56).\n"
+            "- Sugira classes de fundos (ex.: Tesouro Selic, fundo multimercado, ETF de "
+            "ações internacionais) para corrigir cada desvio; nunca cite ticker ou nome "
+            "de fundo específico, pois você não tem acesso a dados de mercado atualizados.\n"
+            "- Cada item das listas deve ser uma frase única em texto simples (string), "
+            "nunca um objeto ou par chave/valor.\n\n"
+            f"Alocação (alvo x atual):\n{drift_text}\n\n"
+            f"Contexto adicional:\n{context_text}\n\n"
+            "Retorne um JSON com as chaves:\n"
+            "- guidance: texto corrido (string) resumindo o estado da carteira frente ao "
+            "alvo definido pelo usuário\n"
+            "- rebalancing_actions: lista de frases com ações concretas de rebalanceamento "
+            "(o que priorizar no próximo aporte, ou o que reduzir) para cada classe fora do "
+            "alvo\n"
+            "- common_mistakes: lista de frases apontando erros comuns de diversificação "
+            "identificáveis nos dados fornecidos (concentração, falta de classe, etc.)\n"
+        )
+
+        payload = _ollama_post(
+            f"{self.ollama_url}/api/generate",
+            {
+                "model": self.chat_model,
+                "prompt": prompt,
+                "stream": False,
+                "format": "json",
+                "options": {"temperature": 0.2},
+            },
+            model=self.chat_model,
+            timeout=300,
+        )
+
+        content = payload.get("response", "{}")
+        try:
+            raw = json.loads(content)
+        except json.JSONDecodeError:
+            raw = {"guidance": content}
+
+        guidance = normalize_portfolio_guidance(raw)
+        guidance["sources"] = [
+            {
+                "source_type": item["chunk"].source_type,
+                "source_id": item["chunk"].source_id,
+                "similarity": round(item["similarity"], 4),
+            }
+            for item in context_chunks
+            if item.get("chunk")
+        ]
+        return guidance
+

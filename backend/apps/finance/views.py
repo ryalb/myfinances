@@ -3,9 +3,11 @@ import hmac
 import logging
 import os
 from datetime import date as date_type
+from decimal import Decimal
 from uuid import UUID
 
 from django.conf import settings
+from django.db import transaction as db_transaction
 from django.db.models import Prefetch, Q
 from django.http import StreamingHttpResponse
 from django.utils import timezone
@@ -17,10 +19,12 @@ from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 from rest_framework_simplejwt.views import TokenObtainPairView
 
+from .allocation import build_allocation_drift, serialize_allocation_drift
 from .consolidation import (
     build_monthly_cash_flow,
     build_monthly_cash_flow_for_range,
     build_monthly_review_summary,
+    build_transaction_stats,
     build_user_financial_summary,
     snapshot_net_worth,
 )
@@ -32,10 +36,12 @@ from .domain import (
 from .filters import filter_transactions, user_transactions
 from .models import (
     Account,
+    BudgetBucketTarget,
     Card,
     CategorizationRule,
     Connection,
     ConnectionStatus,
+    FinanceTag,
     FinancialGoal,
     FinancialInstitution,
     FutureProjectionReport,
@@ -44,7 +50,9 @@ from .models import (
     MonthlyReview,
     NetWorthSnapshot,
     PensionPlan,
+    PortfolioBuilderReport,
     PortfolioReport,
+    PortfolioTarget,
     Subscription,
     SubscriptionPayment,
     SyncJob,
@@ -53,9 +61,12 @@ from .models import (
 from .pagination import UnboundedCollectionPagination
 from .serializers import (
     AccountSerializer,
+    BudgetBucketTargetInputSerializer,
+    BudgetBucketTargetSerializer,
     CardSerializer,
     CategorizationRuleSerializer,
     ConnectionSerializer,
+    FinanceTagSerializer,
     FinancialGoalSerializer,
     FinancialInstitutionSerializer,
     FinancialSummarySerializer,
@@ -66,12 +77,17 @@ from .serializers import (
     MonthlyReviewSerializer,
     MonthlyReviewSummarySerializer,
     PensionPlanSerializer,
+    PortfolioBuilderReportSerializer,
     PortfolioReportSerializer,
+    PortfolioTargetInputSerializer,
+    PortfolioTargetSerializer,
     RegisterSerializer,
     SubscriptionPaymentSerializer,
     SubscriptionSerializer,
     SyncJobSerializer,
+    TransactionCategoryInputSerializer,
     TransactionSerializer,
+    TransactionStatsSerializer,
 )
 from .services import PluggyClient
 from .tasks import _reconcile_subscriptions, recompute_user_snapshot, sync_connection_data
@@ -198,6 +214,46 @@ class TransactionViewSet(viewsets.ReadOnlyModelViewSet):
             .order_by("category")
         )
         return Response(list(values))
+
+    @action(detail=False, methods=["get"], url_path="stats")
+    def stats(self, request):
+        """Totais e composicao por categoria da lista filtrada, para os cards e
+        graficos da tela de transacoes -- mesmos filtros da listagem
+        (`filter_transactions`), para os numeros baterem com a tabela.
+        """
+        queryset = filter_transactions(user_transactions(request.user), request.query_params)
+        stats = build_transaction_stats(queryset)
+        return Response(TransactionStatsSerializer(stats).data)
+
+    @action(detail=True, methods=["patch", "delete"], url_path="category")
+    def category(self, request, pk=None):
+        """Edicao manual da categoria de uma transacao.
+
+        PATCH grava a categoria escolhida e marca `category_is_manual` -- daqui
+        em diante, sync (a Pluggy reenvia a mesma transacao em updates) e
+        "reaplicar regras" (`CategorizationRuleViewSet.reapply`) ignoram esta
+        transacao, para nao apagar a escolha do usuario em silencio. DELETE
+        remove a marca e recalcula a categoria automatica, como se o usuario
+        nunca tivesse editado.
+        """
+        transaction = self.get_object()
+
+        if request.method == "DELETE":
+            transaction.category = normalize_transaction_category(
+                transaction.description,
+                transaction.provider_category,
+                transaction.type,
+                user=request.user,
+            )
+            transaction.category_is_manual = False
+        else:
+            serializer = TransactionCategoryInputSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            transaction.category = serializer.validated_data["category"]
+            transaction.category_is_manual = True
+
+        transaction.save(update_fields=["category", "category_is_manual"])
+        return Response(TransactionSerializer(transaction).data)
 
 
 class CardViewSet(viewsets.ReadOnlyModelViewSet):
@@ -416,6 +472,109 @@ class FinancialGoalViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
+
+
+class PortfolioTargetsAPIView(APIView):
+    """Alvo de alocacao por classe de ativo -- substituido em lote, nao por linha.
+
+    GET lista os alvos atuais. PUT substitui o conjunto inteiro (todas as
+    classes de uma vez): a soma tem que ficar perto de 100%, o que so faz
+    sentido validar sobre o lote completo -- uma unica linha nunca soma 100%
+    sozinha, entao um CRUD por linha (`ModelViewSet`) deixaria o usuario passar
+    por estados intermediarios invalidos a cada chamada.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        targets = PortfolioTarget.objects.filter(user=request.user)
+        return Response(PortfolioTargetSerializer(targets, many=True).data)
+
+    def put(self, request):
+        rows_serializer = PortfolioTargetInputSerializer(data=request.data, many=True)
+        rows_serializer.is_valid(raise_exception=True)
+        rows = rows_serializer.validated_data
+
+        asset_classes = [row["asset_class"] for row in rows]
+        if len(asset_classes) != len(set(asset_classes)):
+            return Response({"error": "Classe de ativo duplicada no lote."}, status=400)
+
+        total = sum((row["target_percentage"] for row in rows), Decimal("0"))
+        if rows and abs(total - Decimal("100")) > Decimal("0.5"):
+            return Response(
+                {"error": f"A soma dos alvos deve ficar perto de 100% (recebido {total}%)."},
+                status=400,
+            )
+
+        with db_transaction.atomic():
+            PortfolioTarget.objects.filter(user=request.user).delete()
+            PortfolioTarget.objects.bulk_create(
+                PortfolioTarget(user=request.user, **row) for row in rows
+            )
+
+        targets = PortfolioTarget.objects.filter(user=request.user)
+        return Response(PortfolioTargetSerializer(targets, many=True).data)
+
+
+class FinanceTagViewSet(viewsets.ModelViewSet):
+    """Papel atribuido pelo usuario a uma conta/investimento/meta (`FinanceTag`).
+
+    Usado hoje pelo construtor de portfolio (`kind=asset_class`); o otimizador
+    (Fase 6) reaproveita sem alteracao, so filtrando por `kind=budget_bucket`.
+    """
+
+    serializer_class = FinanceTagSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = FinanceTag.objects.filter(user=self.request.user).select_related(
+            "account", "investment", "goal"
+        )
+        kind = self.request.query_params.get("kind")
+        if kind:
+            queryset = queryset.filter(kind=kind)
+        return queryset
+
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
+
+
+class BudgetBucketTargetsAPIView(APIView):
+    """Alvo de orcamento por bucket (% da renda) -- mesmo padrao de
+    `PortfolioTargetsAPIView`: PUT substitui o lote inteiro, a soma e validada
+    sobre o conjunto completo.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        targets = BudgetBucketTarget.objects.filter(user=request.user)
+        return Response(BudgetBucketTargetSerializer(targets, many=True).data)
+
+    def put(self, request):
+        rows_serializer = BudgetBucketTargetInputSerializer(data=request.data, many=True)
+        rows_serializer.is_valid(raise_exception=True)
+        rows = rows_serializer.validated_data
+
+        buckets = [row["bucket"] for row in rows]
+        if len(buckets) != len(set(buckets)):
+            return Response({"error": "Bucket duplicado no lote."}, status=400)
+
+        total = sum((row["target_percentage"] for row in rows), Decimal("0"))
+        if rows and abs(total - Decimal("100")) > Decimal("0.5"):
+            return Response(
+                {"error": f"A soma dos alvos deve ficar perto de 100% (recebido {total}%)."},
+                status=400,
+            )
+
+        with db_transaction.atomic():
+            BudgetBucketTarget.objects.filter(user=request.user).delete()
+            BudgetBucketTarget.objects.bulk_create(
+                BudgetBucketTarget(user=request.user, **row) for row in rows
+            )
+
+        targets = BudgetBucketTarget.objects.filter(user=request.user)
+        return Response(BudgetBucketTargetSerializer(targets, many=True).data)
 
 
 class PluggyConnectTokenAPIView(APIView):
@@ -686,9 +845,13 @@ class CategorizationRuleViewSet(viewsets.ModelViewSet):
         transacao.
         """
         rules = active_categorization_rules(request.user)
+        # Exclui categoria escolhida a mao: reaplicar regras nao deve apagar uma
+        # correcao manual do usuario na tela de transacoes.
         queryset = Transaction.objects.filter(
             Q(account__connection__user=request.user) | Q(card__connection__user=request.user)
-        ).only("id", "description", "provider_category", "type", "category")
+        ).exclude(category_is_manual=True).only(
+            "id", "description", "provider_category", "type", "category"
+        )
 
         changed = []
         for transaction in queryset.iterator(chunk_size=2000):
@@ -929,4 +1092,67 @@ class FutureProjectionAPIView(APIView):
         deleted, _ = FutureProjectionReport.objects.filter(user=request.user).delete()
         if not deleted:
             return Response({"detail": "Nenhuma narração para excluir."}, status=404)
+        return Response(status=204)
+
+
+class PortfolioBuilderAPIView(APIView):
+    """Orientacao Bogleheads de IA sobre o desvio de alocacao (`allocation.py`).
+
+    Mesma estrutura de `PortfolioReportAPIView`/`FutureProjectionAPIView`: uma
+    orientacao por usuario, "Reanalisar" substitui em vez de acumular historico.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        report = PortfolioBuilderReport.objects.filter(user=request.user).first()
+        if report is None:
+            return Response({"detail": "Nenhuma orientação gerada ainda."}, status=404)
+        return Response(PortfolioBuilderReportSerializer(report).data)
+
+    def post(self, request):
+        from .ai_services import AIServiceUnavailable, LLMService, RAGService
+
+        try:
+            rag = RAGService()
+            llm = LLMService()
+
+            index_stats = rag.index_user_context(request.user)
+            drift = serialize_allocation_drift(build_allocation_drift(request.user))
+            if not drift:
+                return Response(
+                    {
+                        "error": (
+                            "Nao ha dados suficientes para gerar a orientacao. Defina ao "
+                            "menos um alvo de alocacao e sincronize seus investimentos."
+                        )
+                    },
+                    status=422,
+                )
+            context = rag.retrieve_portfolio_builder_context(request.user)
+            guidance = llm.generate_portfolio_builder_guidance(context, drift)
+        except AIServiceUnavailable as exc:
+            logger.warning("Orientacao do construtor de portfolio indisponivel: %s", exc)
+            return Response({"error": str(exc)}, status=503)
+
+        saved, _ = PortfolioBuilderReport.objects.update_or_create(
+            user=request.user,
+            defaults={
+                "drift": drift,
+                "guidance": guidance.get("guidance", ""),
+                "rebalancing_actions": guidance.get("rebalancing_actions", []),
+                "common_mistakes": guidance.get("common_mistakes", []),
+                "disclaimer": guidance.get("disclaimer", ""),
+                "sources": guidance.get("sources", []),
+            },
+        )
+
+        data = PortfolioBuilderReportSerializer(saved).data
+        data["index"] = index_stats
+        return Response(data)
+
+    def delete(self, request):
+        deleted, _ = PortfolioBuilderReport.objects.filter(user=request.user).delete()
+        if not deleted:
+            return Response({"detail": "Nenhuma orientação para excluir."}, status=404)
         return Response(status=204)

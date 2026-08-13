@@ -76,7 +76,9 @@ export function useApi() {
   // Escritas propagam o erro depois de tratar o 401. Devolver `null` numa falha
   // de validação faz o formulário parecer ter salvo: o chamador não tem como
   // distinguir sucesso de 400 e o usuário não recebe mensagem nenhuma.
-  const write = async <T>(method: 'POST' | 'PATCH' | 'DELETE', path: string, body?: Record<string, unknown>): Promise<T | null> => {
+  // `body` aceita array (não só objeto) para o PUT em lote de
+  // `/portfolio-targets/`, que substitui a lista inteira num corpo JSON puro.
+  const write = async <T>(method: 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, body?: Record<string, unknown> | unknown[]): Promise<T | null> => {
     const attempt = () =>
       $fetch<T>(`${config.public.apiBaseUrl}${path}`, {
         method,
@@ -105,6 +107,7 @@ export function useApi() {
   }
 
   const post = <T>(path: string, body: Record<string, unknown>) => write<T>('POST', path, body)
+  const put = <T>(path: string, body: Record<string, unknown> | unknown[]) => write<T>('PUT', path, body)
   const patch = <T>(path: string, body: Record<string, unknown>) => write<T>('PATCH', path, body)
   const del = <T>(path: string) => write<T>('DELETE', path)
 
@@ -158,5 +161,5 @@ export function useApi() {
     }
   }
 
-  return { get, post, patch, del, download, graphql, getHeaders }
+  return { get, post, put, patch, del, download, graphql, getHeaders }
 }

@@ -5,11 +5,11 @@ from decimal import Decimal
 from typing import TypedDict
 
 from django.conf import settings
-from django.db.models import Q, Sum
+from django.db.models import Count, Q, Sum
 from django.db.models.functions import Lower
 from django.utils import timezone
 
-from .domain import classify_account_balance
+from .domain import DEFAULT_CATEGORY, classify_account_balance
 from .models import (
     Account,
     Card,
@@ -70,13 +70,31 @@ def build_user_financial_summary(user) -> dict:
     }
 
 
-def _exclude_internal_transfers(queryset):
+def latest_positions_by_investment(user) -> dict[int, InvestmentPosition]:
+    """A posicao mais recente de cada investimento do usuario, por `investment_id`.
+
+    Extraido de `ai_services._build_investments_document` (que fazia a mesma
+    passagem so para o proprio uso): `allocation.build_actual_allocation`
+    (Fase 4) precisa do mesmo mapa, e repetir esta query em dois lugares arrisca
+    os dois divergirem em qual posicao conta como "atual" quando ha mais de uma
+    no mesmo dia.
+    """
+    latest: dict[int, InvestmentPosition] = {}
+    for position in InvestmentPosition.objects.filter(
+        investment__connection__user=user
+    ).order_by("investment_id", "as_of_date"):
+        latest[position.investment_id] = position
+    return latest
+
+
+def exclude_internal_transfers(queryset):
     """Remove transferencias internas (fatura de cartao, transferencia entre
     contas proprias) de um queryset de `Transaction`.
 
-    Extraido daqui porque a mesma exclusao passou a ser necessaria em mais de um
-    lugar (fluxo de caixa, deltas de categoria da revisao mensal): repetir o
-    annotate+exclude arrisca a lista de categorias divergir entre eles.
+    Publica (nao `_`) porque a mesma exclusao passou a ser necessaria fora deste
+    modulo tambem (`budget_buckets.build_bucket_actuals_for_month`, Fase 6):
+    repetir o annotate+exclude arrisca a lista de categorias divergir entre os
+    chamadores.
     """
     return queryset.annotate(provider_category_lower=Lower("provider_category")).exclude(
         provider_category_lower__in=settings.FINANCE_INTERNAL_TRANSFER_CATEGORIES
@@ -96,7 +114,7 @@ def build_monthly_cash_flow_for_range(user, start_date, end_date) -> dict:
     # pela categoria, o lado do cartao virava receita fantasma e o lado da conta
     # duplicava uma despesa que ja foi contada quando a compra ocorreu no cartao.
     # O mesmo vale para transferencia entre contas do proprio usuario.
-    transactions = _exclude_internal_transfers(
+    transactions = exclude_internal_transfers(
         Transaction.objects.filter(
             Q(account__connection__user=user) | Q(card__connection__user=user),
             booked_at__gte=start_at,
@@ -343,7 +361,7 @@ def build_category_deltas_for_month(user, year: int, month: int) -> list[Categor
     def totals_by_category(start: date_type, end: date_type) -> dict[str, Decimal]:
         start_at = timezone.make_aware(datetime.combine(start, time.min))
         end_at = timezone.make_aware(datetime.combine(end, time.min))
-        queryset = _exclude_internal_transfers(
+        queryset = exclude_internal_transfers(
             Transaction.objects.filter(
                 Q(account__connection__user=user) | Q(card__connection__user=user),
                 type=TransactionType.DEBIT,
@@ -371,6 +389,63 @@ def build_category_deltas_for_month(user, year: int, month: int) -> list[Categor
         )
     deltas.sort(key=lambda item: -item["delta"])
     return deltas
+
+
+class CategoryTotal(TypedDict):
+    category: str
+    total: Decimal
+    count: int
+    percentage: Decimal
+
+
+def build_transaction_stats(queryset) -> dict:
+    """Estatisticas e totais por categoria sobre um queryset de `Transaction`
+    ja filtrado (mesmos filtros da tela de transacoes), para os cards e
+    graficos baterem com o que esta na tabela.
+
+    Transferencias internas (fatura de cartao, transferencia entre contas
+    proprias) ficam de fora dos totais e das categorias -- mesma exclusao do
+    fluxo de caixa e dos deltas de categoria da revisao mensal: nao sao
+    receita nem despesa, so dinheiro mudando de bolso.
+    """
+    real = exclude_internal_transfers(queryset)
+
+    income_total = real.filter(type=TransactionType.CREDIT).aggregate(total=Sum("amount")).get(
+        "total"
+    ) or Decimal("0")
+    expenses_agg = real.filter(type=TransactionType.DEBIT).aggregate(
+        total=Sum("amount"), count=Count("id")
+    )
+    expenses_total = expenses_agg.get("total") or Decimal("0")
+    expenses_count = expenses_agg.get("count") or 0
+
+    def totals_by_category(type_value: str) -> list[CategoryTotal]:
+        rows = list(
+            real.filter(type=type_value)
+            .values("category")
+            .annotate(total=Sum("amount"), count=Count("id"))
+            .order_by("-total")
+        )
+        grand_total = sum((row["total"] or Decimal("0")) for row in rows) or Decimal("1")
+        return [
+            {
+                "category": row["category"] or DEFAULT_CATEGORY,
+                "total": row["total"] or Decimal("0"),
+                "count": row["count"],
+                "percentage": (row["total"] or Decimal("0")) / grand_total * Decimal("100"),
+            }
+            for row in rows
+        ]
+
+    return {
+        "total_income": income_total,
+        "total_expenses": expenses_total,
+        "balance": income_total - expenses_total,
+        "transaction_count": queryset.count(),
+        "average_expense": (expenses_total / expenses_count) if expenses_count else Decimal("0"),
+        "expense_categories": totals_by_category(TransactionType.DEBIT),
+        "income_categories": totals_by_category(TransactionType.CREDIT),
+    }
 
 
 def build_monthly_review_summary(user, year: int, month: int) -> dict:

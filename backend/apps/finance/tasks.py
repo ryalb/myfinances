@@ -75,65 +75,76 @@ def _upsert_transaction(tx: dict, *, account, card, user) -> None:
     merchant = tx.get("merchant") or {}
     credit_card_metadata = tx.get("creditCardMetadata") or {}
     payment_data = tx.get("paymentData") or {}
+    defaults = {
+        "account": account,
+        "card": card,
+        "description": tx.get("description", "Transação"),
+        # Magnitude, nao valor com sinal.
+        #
+        # A Pluggy assina `amount` e a convencao **difere** entre conta e cartao:
+        # em conta a saida e negativa; em cartao a compra e positiva e o
+        # pagamento da fatura e negativo. O indicador confiavel de direcao e
+        # `type` (DEBIT = saida, CREDIT = entrada), que e obrigatorio.
+        #
+        # Guardar com sinal fazia `Sum(amount)` das despesas dar negativo (taxa
+        # de poupanca acima de 100%), o prefixo "-" da tela virar "--", e a
+        # reconciliacao de assinaturas nunca casar, porque ela filtra amount > 0.
+        "amount": abs(tx.get("amount", 0) or 0),
+        "currency": tx.get("currencyCode", "BRL"),
+        "type": tx_type,
+        "category": normalize_transaction_category(
+            tx.get("description", ""),
+            provider_category,
+            tx_type,
+            user=user,
+        ),
+        "provider_category": provider_category,
+        "booked_at": _parse_booked_at(tx.get("date")),
+        # Campos crus da Pluggy sem uso na tela hoje -- ver comentario em
+        # `Transaction` (models.py) sobre o uso pelo relatorio de IA.
+        "description_raw": tx.get("descriptionRaw") or "",
+        "amount_in_account_currency": tx.get("amountInAccountCurrency"),
+        "balance_after": tx.get("balance"),
+        "provider_code": tx.get("providerCode") or "",
+        "status": tx.get("status") or "",
+        "operation_type": tx.get("operationType") or "",
+        "operation_type_additional_info": tx.get("operationTypeAdditionalInfo") or "",
+        "provider_transaction_id": tx.get("providerId") or "",
+        "merchant_name": merchant.get("name") or "",
+        "merchant_business_name": merchant.get("businessName") or "",
+        "merchant_cnpj": merchant.get("cnpj") or "",
+        "merchant_cnae": merchant.get("cnae") or "",
+        "installment_number": _int_or_none(credit_card_metadata.get("installmentNumber")),
+        "installment_total": _int_or_none(credit_card_metadata.get("totalInstallments")),
+        "installment_total_amount": credit_card_metadata.get("totalAmount"),
+        "purchase_date": (
+            _parse_booked_at(credit_card_metadata["purchaseDate"])
+            if credit_card_metadata.get("purchaseDate")
+            else None
+        ),
+        "payee_mcc": credit_card_metadata.get("payeeMCC") or "",
+        "bill_id": credit_card_metadata.get("billId") or "",
+        "bill_forecast_date": credit_card_metadata.get("billForecastDate") or "",
+        "payment_method": payment_data.get("paymentMethod") or "",
+        "payment_reason": payment_data.get("reason") or "",
+        "payment_reference_number": payment_data.get("referenceNumber") or "",
+        "payment_authentication_code": payment_data.get("authenticationCode") or "",
+        "payment_payer": payment_data.get("payer") or {},
+        "payment_receiver": payment_data.get("receiver") or {},
+    }
+
+    # Categoria escolhida a mao na tela de transacoes: a Pluggy reenvia a mesma
+    # transacao em syncs incrementais e webhooks de update, e sem essa guarda
+    # cada reenvio recomputava e apagava a escolha do usuario em silencio.
+    existing = Transaction.objects.filter(external_id=tx["id"]).only(
+        "id", "category_is_manual"
+    ).first()
+    if existing and existing.category_is_manual:
+        defaults.pop("category")
+
     Transaction.objects.update_or_create(
         external_id=tx["id"],
-        defaults={
-            "account": account,
-            "card": card,
-            "description": tx.get("description", "Transação"),
-            # Magnitude, nao valor com sinal.
-            #
-            # A Pluggy assina `amount` e a convencao **difere** entre conta e cartao:
-            # em conta a saida e negativa; em cartao a compra e positiva e o
-            # pagamento da fatura e negativo. O indicador confiavel de direcao e
-            # `type` (DEBIT = saida, CREDIT = entrada), que e obrigatorio.
-            #
-            # Guardar com sinal fazia `Sum(amount)` das despesas dar negativo (taxa
-            # de poupanca acima de 100%), o prefixo "-" da tela virar "--", e a
-            # reconciliacao de assinaturas nunca casar, porque ela filtra amount > 0.
-            "amount": abs(tx.get("amount", 0) or 0),
-            "currency": tx.get("currencyCode", "BRL"),
-            "type": tx_type,
-            "category": normalize_transaction_category(
-                tx.get("description", ""),
-                provider_category,
-                tx_type,
-                user=user,
-            ),
-            "provider_category": provider_category,
-            "booked_at": _parse_booked_at(tx.get("date")),
-            # Campos crus da Pluggy sem uso na tela hoje -- ver comentario em
-            # `Transaction` (models.py) sobre o uso pelo relatorio de IA.
-            "description_raw": tx.get("descriptionRaw") or "",
-            "amount_in_account_currency": tx.get("amountInAccountCurrency"),
-            "balance_after": tx.get("balance"),
-            "provider_code": tx.get("providerCode") or "",
-            "status": tx.get("status") or "",
-            "operation_type": tx.get("operationType") or "",
-            "operation_type_additional_info": tx.get("operationTypeAdditionalInfo") or "",
-            "provider_transaction_id": tx.get("providerId") or "",
-            "merchant_name": merchant.get("name") or "",
-            "merchant_business_name": merchant.get("businessName") or "",
-            "merchant_cnpj": merchant.get("cnpj") or "",
-            "merchant_cnae": merchant.get("cnae") or "",
-            "installment_number": _int_or_none(credit_card_metadata.get("installmentNumber")),
-            "installment_total": _int_or_none(credit_card_metadata.get("totalInstallments")),
-            "installment_total_amount": credit_card_metadata.get("totalAmount"),
-            "purchase_date": (
-                _parse_booked_at(credit_card_metadata["purchaseDate"])
-                if credit_card_metadata.get("purchaseDate")
-                else None
-            ),
-            "payee_mcc": credit_card_metadata.get("payeeMCC") or "",
-            "bill_id": credit_card_metadata.get("billId") or "",
-            "bill_forecast_date": credit_card_metadata.get("billForecastDate") or "",
-            "payment_method": payment_data.get("paymentMethod") or "",
-            "payment_reason": payment_data.get("reason") or "",
-            "payment_reference_number": payment_data.get("referenceNumber") or "",
-            "payment_authentication_code": payment_data.get("authenticationCode") or "",
-            "payment_payer": payment_data.get("payer") or {},
-            "payment_receiver": payment_data.get("receiver") or {},
-        },
+        defaults=defaults,
     )
 
 

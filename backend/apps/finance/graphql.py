@@ -5,6 +5,13 @@ from django.utils import timezone
 from graphene_django import DjangoObjectType
 
 from .alerts import build_user_alerts
+from .allocation import (
+    build_allocation_drift,
+    serialize_allocation_drift,
+    taggable_cash_accounts,
+    untagged_investments,
+)
+from .budget_buckets import build_bucket_drift, serialize_bucket_drift
 from .consolidation import (
     add_months,
     build_monthly_cash_flow,
@@ -222,6 +229,36 @@ class FinancialHealthScoreType(graphene.ObjectType):
     top_actions = graphene.List(graphene.String)
 
 
+class AllocationDriftRowType(graphene.ObjectType):
+    asset_class = graphene.String()
+    label = graphene.String()
+    target_percentage = graphene.Float()
+    actual_percentage = graphene.Float()
+    actual_amount = graphene.Float()
+    drift_pp = graphene.Float()
+
+
+class BucketDriftRowType(graphene.ObjectType):
+    bucket = graphene.String()
+    label = graphene.String()
+    target_percentage = graphene.Float()
+    actual_percentage = graphene.Float()
+    actual_amount = graphene.Float()
+    drift_pp = graphene.Float()
+
+
+class UntaggedInvestmentType(graphene.ObjectType):
+    id = graphene.Int()
+    name = graphene.String()
+    kind = graphene.String()
+
+
+class TaggableAccountType(graphene.ObjectType):
+    id = graphene.Int()
+    name = graphene.String()
+    type = graphene.String()
+
+
 class ScenarioValueType(graphene.ObjectType):
     years = graphene.Int()
     net_worth = graphene.Float()
@@ -303,6 +340,12 @@ class Query(graphene.ObjectType):
     alerts = graphene.List(AlertType)
     future_projection = graphene.Field(FutureProjectionType)
     financial_health_score = graphene.Field(FinancialHealthScoreType)
+    portfolio_allocation_drift = graphene.List(AllocationDriftRowType)
+    untagged_investments = graphene.List(UntaggedInvestmentType)
+    taggable_cash_accounts = graphene.List(TaggableAccountType)
+    budget_bucket_drift = graphene.List(
+        BucketDriftRowType, year=graphene.Int(), month=graphene.Int()
+    )
 
     def resolve_institutions(self, info):
         user = info.context.user
@@ -634,3 +677,38 @@ class Query(graphene.ObjectType):
             components=components,
             top_actions=data["top_actions"],
         )
+
+    def resolve_portfolio_allocation_drift(self, info):
+        user = info.context.user
+        if not user or not user.is_authenticated:
+            return []
+        rows = serialize_allocation_drift(build_allocation_drift(user))
+        return [AllocationDriftRowType(**row) for row in rows]
+
+    def resolve_untagged_investments(self, info):
+        user = info.context.user
+        if not user or not user.is_authenticated:
+            return []
+        return [
+            UntaggedInvestmentType(id=investment.id, name=investment.name, kind=investment.kind)
+            for investment in untagged_investments(user)
+        ]
+
+    def resolve_taggable_cash_accounts(self, info):
+        user = info.context.user
+        if not user or not user.is_authenticated:
+            return []
+        return [
+            TaggableAccountType(id=account.id, name=account.name, type=account.type)
+            for account in taggable_cash_accounts(user)
+        ]
+
+    def resolve_budget_bucket_drift(self, info, year=None, month=None):
+        user = info.context.user
+        if not user or not user.is_authenticated:
+            return []
+        now = timezone.localdate()
+        rows = serialize_bucket_drift(
+            build_bucket_drift(user, year=year or now.year, month=month or now.month)
+        )
+        return [BucketDriftRowType(**row) for row in rows]

@@ -6,10 +6,12 @@ from rest_framework_simplejwt.views import TokenRefreshView
 from apps.finance.graphql_view import JWTGraphQLView
 from apps.finance.views import (
     AccountViewSet,
+    BudgetBucketTargetsAPIView,
     CardViewSet,
     CategorizationRuleViewSet,
     ConnectionViewSet,
     CurrentUserAPIView,
+    FinanceTagViewSet,
     FinancialGoalViewSet,
     FinancialInstitutionViewSet,
     FinancialSummaryAPIView,
@@ -25,7 +27,9 @@ from apps.finance.views import (
     PluggyImportItemAPIView,
     PluggyRegenerateAuthAPIView,
     PluggyWebhookAPIView,
+    PortfolioBuilderAPIView,
     PortfolioReportAPIView,
+    PortfolioTargetsAPIView,
     RegisterAPIView,
     SubscriptionPaymentViewSet,
     SubscriptionViewSet,
@@ -51,6 +55,7 @@ router.register(
     r"subscription-payments", SubscriptionPaymentViewSet, basename="subscription-payment"
 )
 router.register(r"categorization-rules", CategorizationRuleViewSet, basename="categorization-rule")
+router.register(r"finance-tags", FinanceTagViewSet, basename="finance-tag")
 
 urlpatterns = [
     path("admin/", admin.site.urls),
@@ -64,6 +69,16 @@ urlpatterns = [
         "api/v1/monthly-review/",
         MonthlyReviewAPIView.as_view(),
         name="monthly-review",
+    ),
+    path(
+        "api/v1/portfolio-targets/",
+        PortfolioTargetsAPIView.as_view(),
+        name="portfolio-targets",
+    ),
+    path(
+        "api/v1/budget-bucket-targets/",
+        BudgetBucketTargetsAPIView.as_view(),
+        name="budget-bucket-targets",
     ),
     path(
         "api/v1/net-worth/snapshot/",
@@ -110,6 +125,11 @@ urlpatterns = [
         "api/v1/ai/future-projection/",
         FutureProjectionAPIView.as_view(),
         name="future-projection-report",
+    ),
+    path(
+        "api/v1/ai/portfolio-builder/",
+        PortfolioBuilderAPIView.as_view(),
+        name="portfolio-builder-report",
     ),
     path("graphql/", JWTGraphQLView.as_view(graphiql=True)),
 ]

@@ -125,6 +125,10 @@ def test_the_dashboard_queries_all_resolve_over_http(csrf_client, user, connecti
         "alerts": "{ alerts { kind severity } }",
         "futureProjection": "{ futureProjection { currentNetWorth } }",
         "financialHealthScore": "{ financialHealthScore { score } }",
+        "portfolioAllocationDrift": "{ portfolioAllocationDrift { assetClass driftPp } }",
+        "untaggedInvestments": "{ untaggedInvestments { id name kind } }",
+        "taggableCashAccounts": "{ taggableCashAccounts { id name type } }",
+        "budgetBucketDrift": "{ budgetBucketDrift { bucket driftPp } }",
     }
 
     for name, query in queries.items():

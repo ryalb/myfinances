@@ -7,6 +7,13 @@
 - **Lint/format/typecheck**: `ruff` + `ty` (backend), ESLint flat config (frontend).
 - **Pre-commit**: `prek.toml` runs ruff, ty, and eslint. Install once with `uv tool run prek install`.
 
+### Python execution — `uv` only, no exceptions
+- This repo has **no Poetry, no Pipenv, no bare venv**: there is a `uv.lock` in `backend/` and nothing else. `poetry.lock` / `requirements.txt` do not exist and must not be introduced.
+- **ALWAYS** run backend Python through `uv run ...` (e.g. `cd backend && uv run python manage.py test`, `uv run pytest`, `uv run ruff check .`). **NEVER** invoke `python`, `python3`, `pip`, `pip3`, `poetry`, or `pipenv` directly — those bypass the locked, project-scoped environment in `backend/.venv`.
+- Adding a dependency: `uv add <pkg>` (or `uv add --group dev <pkg>`) from `backend/`, not `pip install`.
+- Installing tools that aren't project deps (e.g. `prek`): `uv tool run <tool>` / `uv tool install <tool>`.
+- If a command seems to need a bare `python`/`pip`/`poetry` invocation, that's a sign to find the `uv run` or `uv tool` equivalent instead — not to fall back to the bare command.
+
 ## Setup
 ```bash
 mise install

@@ -150,6 +150,24 @@ def test_reapply_reports_zero_when_nothing_changes(api, user, account):
 
 
 @pytest.mark.django_db
+def test_reapply_never_touches_a_manually_categorized_transaction(api, user, account):
+    """Categoria escolhida a mao na tela de transacoes sobrevive a reaplicar
+    regras -- senao criar uma regra apagaria a correcao manual em silencio."""
+    tx = make_transaction(
+        account, description="UBER TRIP 99", category="Minha categoria", external_id="tx-reapply-manual"
+    )
+    tx.category_is_manual = True
+    tx.save(update_fields=["category_is_manual"])
+    CategorizationRule.objects.create(user=user, pattern="uber", category="transporte")
+
+    response = api.post(REAPPLY_URL)
+
+    assert response.data["updated"] == 0
+    tx.refresh_from_db()
+    assert tx.category == "Minha categoria"
+
+
+@pytest.mark.django_db
 def test_reapply_never_touches_another_users_transactions(
     api, user, other_user, account, institution
 ):
