@@ -1,20 +1,24 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import Button from 'primevue/button'
+import DatePicker from 'primevue/datepicker'
+import InputNumber from 'primevue/inputnumber'
+import InputText from 'primevue/inputtext'
+import { toIsoDateString } from '@/composables/useDateFormat'
 
 const emit = defineEmits(['created'])
 const { createGoal } = useGoals()
 
 const showModal = ref(false)
 const name = ref('')
-const targetAmount = ref('')
-const currentAmount = ref('0')
-const targetDate = ref('')
+const targetAmount = ref<number | null>(null)
+const currentAmount = ref<number | null>(0)
+const targetDate = ref<Date | null>(null)
 const loading = ref(false)
 const error = ref('')
 
 const handleSubmit = async () => {
-  if (!name.value || !targetAmount.value) {
+  if (!name.value || targetAmount.value === null) {
     error.value = 'Nome e valor alvo são obrigatórios.'
     return
   }
@@ -23,15 +27,15 @@ const handleSubmit = async () => {
   try {
     await createGoal({
       name: name.value,
-      target_amount: parseFloat(targetAmount.value),
-      current_amount: parseFloat(currentAmount.value) || 0,
-      target_date: targetDate.value || undefined,
+      target_amount: targetAmount.value,
+      current_amount: currentAmount.value ?? 0,
+      target_date: targetDate.value ? toIsoDateString(targetDate.value) : undefined,
     })
     showModal.value = false
     name.value = ''
-    targetAmount.value = ''
-    currentAmount.value = '0'
-    targetDate.value = ''
+    targetAmount.value = null
+    currentAmount.value = 0
+    targetDate.value = null
     emit('created')
   } catch (e: unknown) {
     error.value = e instanceof Error ? e.message : 'Erro ao criar meta.'
@@ -67,43 +71,41 @@ const handleSubmit = async () => {
               <div class="space-y-4">
                 <div>
                   <label class="mb-1 block text-sm font-medium text-sepia-700">Nome da meta</label>
-                  <input
+                  <InputText
                     v-model="name"
                     type="text"
                     placeholder="Ex: Aposentadoria, Viagem..."
-                    class="w-full rounded-lg border border-sepia-300 px-3 py-2 text-sm focus:border-sepia-500 focus:outline-none focus:ring-1 focus:ring-sepia-500"
-                  >
+                    class="w-full"
+                  />
                 </div>
 
                 <div>
                   <label class="mb-1 block text-sm font-medium text-sepia-700">Valor alvo (R$)</label>
-                  <input
+                  <InputNumber
                     v-model="targetAmount"
-                    type="number"
-                    step="0.01"
-                    placeholder="100000"
-                    class="w-full rounded-lg border border-sepia-300 px-3 py-2 text-sm focus:border-sepia-500 focus:outline-none focus:ring-1 focus:ring-sepia-500"
-                  >
+                    mode="currency"
+                    currency="BRL"
+                    locale="pt-BR"
+                    placeholder="R$ 100.000,00"
+                    class="w-full"
+                  />
                 </div>
 
                 <div>
                   <label class="mb-1 block text-sm font-medium text-sepia-700">Valor atual (R$)</label>
-                  <input
+                  <InputNumber
                     v-model="currentAmount"
-                    type="number"
-                    step="0.01"
-                    placeholder="0"
-                    class="w-full rounded-lg border border-sepia-300 px-3 py-2 text-sm focus:border-sepia-500 focus:outline-none focus:ring-1 focus:ring-sepia-500"
-                  >
+                    mode="currency"
+                    currency="BRL"
+                    locale="pt-BR"
+                    placeholder="R$ 0,00"
+                    class="w-full"
+                  />
                 </div>
 
                 <div>
                   <label class="mb-1 block text-sm font-medium text-sepia-700">Data alvo</label>
-                  <input
-                    v-model="targetDate"
-                    type="date"
-                    class="w-full rounded-lg border border-sepia-300 px-3 py-2 text-sm focus:border-sepia-500 focus:outline-none focus:ring-1 focus:ring-sepia-500"
-                  >
+                  <DatePicker v-model="targetDate" date-format="dd/mm/yy" show-icon icon-display="input" show-button-bar class="w-full" />
                 </div>
 
                 <p v-if="error" class="text-sm text-vermelho-600">{{ error }}</p>

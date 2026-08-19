@@ -1,8 +1,16 @@
 <script setup lang="ts">
+import Button from 'primevue/button'
+import Checkbox from 'primevue/checkbox'
+import DatePicker from 'primevue/datepicker'
+import IconField from 'primevue/iconfield'
+import InputIcon from 'primevue/inputicon'
+import InputNumber from 'primevue/inputnumber'
+import InputText from 'primevue/inputtext'
+import Select from 'primevue/select'
 import { useUiStore } from '@/stores/ui'
 import { formatBRL } from '@/composables/useCurrency'
 import { extractApiError } from '@/composables/useApi'
-import { formatIsoDateOnly } from '@/composables/useDateFormat'
+import { formatIsoDateOnly, toIsoDateString } from '@/composables/useDateFormat'
 
 definePageMeta({
   middleware: 'auth',
@@ -75,8 +83,11 @@ onUnmounted(() => {
 // dia do mês seguinte ao último incluído -- mesmo limite exclusivo que o backend
 // usa (`booked_at__lt`), então o mês corrente entra inteiro, dias futuros inclusive
 // (parcelas futuras já aparecem na tabela com o selo "Previsto").
-const isoDate = (date: Date) =>
-  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+const parseIsoDate = (value: string): Date | null => {
+  if (!value) return null
+  const [year, month, day] = value.split('-').map(Number)
+  return new Date(year, month - 1, day)
+}
 
 const firstDayOfMonth = (monthsFromNow: number) => {
   const today = new Date()
@@ -85,14 +96,14 @@ const firstDayOfMonth = (monthsFromNow: number) => {
 
 // Um único mês-calendário específico (mês atual = offset 0, "1 mês atrás" = offset -1...).
 const singleMonthRange = (monthsAgo: number) => ({
-  start: isoDate(firstDayOfMonth(-monthsAgo)),
-  end: isoDate(firstDayOfMonth(-monthsAgo + 1)),
+  start: toIsoDateString(firstDayOfMonth(-monthsAgo)),
+  end: toIsoDateString(firstDayOfMonth(-monthsAgo + 1)),
 })
 
 // Janela corrida terminando no mês corrente (ex.: "últimos 12 meses" inclui o mês atual + 11 anteriores).
 const rollingMonthsRange = (months: number) => ({
-  start: isoDate(firstDayOfMonth(-months + 1)),
-  end: isoDate(firstDayOfMonth(1)),
+  start: toIsoDateString(firstDayOfMonth(-months + 1)),
+  end: toIsoDateString(firstDayOfMonth(1)),
 })
 
 const PERIOD_PRESETS: { key: string, label: string, range: () => { start: string, end: string } | null }[] = [
@@ -125,6 +136,33 @@ const periodPreset = computed<string>({
     filters.start_date = range?.start ?? ''
     filters.end_date = range?.end ?? ''
   },
+})
+
+const periodOptions = computed(() => [
+  ...PERIOD_PRESETS.map((preset) => ({ label: preset.label, value: preset.key, disabled: false })),
+  { label: 'Personalizado', value: 'custom', disabled: true },
+])
+
+// O DatePicker e o InputNumber do PrimeVue trabalham com `Date`/`number`, não
+// com as strings que `filters` guarda (formato exigido pelo backend, pela
+// localStorage e pela lógica de preset acima) -- essas pontes convertem só na
+// borda do campo, sem espalhar `Date`/`number` pelo resto da tela.
+const startDateModel = computed<Date | null>({
+  get: () => parseIsoDate(filters.start_date),
+  set: (value) => { filters.start_date = value ? toIsoDateString(value) : '' },
+})
+const endDateModel = computed<Date | null>({
+  get: () => parseIsoDate(filters.end_date),
+  set: (value) => { filters.end_date = value ? toIsoDateString(value) : '' },
+})
+
+const minAmountModel = computed<number | null>({
+  get: () => (filters.min_amount === '' ? null : Number(filters.min_amount)),
+  set: (value) => { filters.min_amount = value === null ? '' : String(value) },
+})
+const maxAmountModel = computed<number | null>({
+  get: () => (filters.max_amount === '' ? null : Number(filters.max_amount)),
+  set: (value) => { filters.max_amount = value === null ? '' : String(value) },
 })
 
 const activeParams = () => ({
@@ -186,6 +224,17 @@ const { data: categories, refresh: refreshCategories } = await useAsyncData(
   { default: () => [] },
 )
 
+const categoryOptions = computed(() => [
+  { label: 'Todas', value: '' },
+  ...categories.value.map((category) => ({ label: category, value: category })),
+])
+
+const TYPE_OPTIONS = [
+  { label: 'Todos', value: '' },
+  { label: 'Receita', value: 'credit' },
+  { label: 'Despesa', value: 'debit' },
+]
+
 // Edição manual da categoria: um lançamento por vez (`editingCategoryId`), com
 // autocomplete pelas categorias já existentes. Depois de salvar/restaurar,
 // estatísticas e a lista de categorias do filtro são recarregadas -- editar
@@ -194,10 +243,13 @@ const editingCategoryId = ref<number | null>(null)
 const editingCategoryValue = ref('')
 // Ref de função, não `ref="..."` direto: o input mora dentro de um `v-for`, e
 // uma string-ref ali é coletada num array pelo Vue mesmo com o `v-if` só
-// deixando um existir por vez -- `.focus()` quebraria num array.
+// deixando um existir por vez -- `.focus()` quebraria num array. O `InputText`
+// do PrimeVue também devolve a instância do componente, não o `<input>` cru --
+// `.$el` é o elemento de fato.
 const categoryInputEl = ref<HTMLInputElement | null>(null)
-const setCategoryInputEl = (el: Element | null) => {
-  categoryInputEl.value = el as HTMLInputElement | null
+const setCategoryInputEl = (el: unknown) => {
+  const target = el && typeof el === 'object' && '$el' in el ? (el as { $el: unknown }).$el : el
+  categoryInputEl.value = target as HTMLInputElement | null
 }
 const savingCategory = ref(false)
 const categoryError = ref('')
@@ -387,9 +439,6 @@ const isFutureTx = (bookedAt: string) => {
   today.setHours(0, 0, 0, 0)
   return txDate > today
 }
-
-const inputClass
-  = 'w-full rounded-lg border border-sepia-300 bg-white px-3 py-2 text-sm focus:border-sepia-500 focus:outline-none focus:ring-1 focus:ring-sepia-500'
 </script>
 
 <template>
@@ -402,14 +451,13 @@ const inputClass
           <span v-if="hasActiveFilter" class="text-sepia-400">(filtrado)</span>
         </span>
         <div ref="columnsMenuRef" class="relative">
-          <button
-            type="button"
-            class="inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-lg border border-sepia-300 bg-white px-3 py-1.5 text-xs font-medium text-sepia-700 hover:bg-sepia-50"
+          <Button
+            class="!inline-flex !shrink-0 !items-center !gap-2 !whitespace-nowrap !rounded-lg !border !border-sepia-300 !bg-white !px-3 !py-1.5 !text-xs !font-medium !text-sepia-700 hover:!bg-sepia-50"
             @click="columnsMenuOpen = !columnsMenuOpen"
           >
             <Icon icon="mdi:view-column-outline" class="h-4 w-4" />
             Colunas
-          </button>
+          </Button>
           <div
             v-if="columnsMenuOpen"
             class="absolute right-0 z-10 mt-2 w-48 rounded-lg border border-sepia-200 bg-white p-2 shadow-md"
@@ -418,25 +466,19 @@ const inputClass
               v-for="column in TABLE_COLUMNS" :key="column.key"
               class="flex items-center gap-2 rounded px-2 py-1.5 text-sm text-sepia-700 hover:bg-sepia-50"
             >
-              <input
-                type="checkbox"
-                :checked="isColumnVisible(column.key)"
-                class="rounded border-sepia-300 text-sepia-900 focus:ring-sepia-500"
-                @change="toggleColumn(column.key)"
-              >
+              <Checkbox :model-value="isColumnVisible(column.key)" binary @update:model-value="toggleColumn(column.key)" />
               {{ column.label }}
             </label>
           </div>
         </div>
-        <button
-          type="button"
+        <Button
           :disabled="exporting || !count"
-          class="inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-lg bg-sepia-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-sepia-950 disabled:opacity-40"
+          class="!inline-flex !shrink-0 !items-center !gap-2 !whitespace-nowrap !rounded-lg !bg-sepia-900 !px-3 !py-1.5 !text-xs !font-medium !text-white hover:!bg-sepia-950 disabled:!opacity-40"
           @click="exportCsv"
         >
           <Icon icon="mdi:download-outline" class="h-4 w-4" />
           {{ exporting ? 'Exportando...' : 'Exportar CSV' }}
-        </button>
+        </Button>
       </div>
     </div>
 
@@ -449,68 +491,66 @@ const inputClass
       <div class="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
         <div class="lg:col-span-2">
           <label class="mb-1 block text-xs font-medium text-sepia-700">Buscar na descrição</label>
-          <div class="relative">
-            <Icon icon="mdi:magnify" class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-sepia-400" />
-            <input v-model="filters.search" type="search" placeholder="Ex: uber, mercado, salário" :class="[inputClass, 'pl-9']">
-          </div>
+          <IconField>
+            <InputIcon>
+              <Icon icon="mdi:magnify" class="h-4 w-4" />
+            </InputIcon>
+            <InputText v-model="filters.search" type="search" placeholder="Ex: uber, mercado, salário" class="w-full" />
+          </IconField>
         </div>
 
         <div>
           <label class="mb-1 block text-xs font-medium text-sepia-700">Categoria</label>
-          <select v-model="filters.category" :class="inputClass">
-            <option value="">Todas</option>
-            <option v-for="category in categories" :key="category" :value="category">{{ category }}</option>
-          </select>
+          <Select v-model="filters.category" :options="categoryOptions" option-label="label" option-value="value" class="w-full" />
         </div>
 
         <div>
           <label class="mb-1 block text-xs font-medium text-sepia-700">Tipo</label>
-          <select v-model="filters.type" :class="inputClass">
-            <option value="">Todos</option>
-            <option value="credit">Receita</option>
-            <option value="debit">Despesa</option>
-          </select>
+          <Select v-model="filters.type" :options="TYPE_OPTIONS" option-label="label" option-value="value" class="w-full" />
         </div>
 
         <div>
           <label class="mb-1 block text-xs font-medium text-sepia-700">Período</label>
-          <select v-model="periodPreset" :class="inputClass">
-            <option v-for="preset in PERIOD_PRESETS" :key="preset.key" :value="preset.key">{{ preset.label }}</option>
-            <option value="custom" disabled>Personalizado</option>
-          </select>
+          <Select
+            v-model="periodPreset"
+            :options="periodOptions"
+            option-label="label"
+            option-value="value"
+            option-disabled="disabled"
+            class="w-full"
+          />
         </div>
 
         <div>
           <label class="mb-1 block text-xs font-medium text-sepia-700">De</label>
-          <input v-model="filters.start_date" type="date" :class="inputClass">
+          <DatePicker v-model="startDateModel" date-format="dd/mm/yy" show-icon icon-display="input" show-button-bar class="w-full" />
         </div>
 
         <div>
           <label class="mb-1 block text-xs font-medium text-sepia-700">Até</label>
-          <input v-model="filters.end_date" type="date" :class="inputClass">
+          <DatePicker v-model="endDateModel" date-format="dd/mm/yy" show-icon icon-display="input" show-button-bar class="w-full" />
         </div>
 
         <div>
           <label class="mb-1 block text-xs font-medium text-sepia-700">Valor mínimo</label>
-          <input v-model="filters.min_amount" type="number" step="0.01" min="0" placeholder="0,00" :class="inputClass">
+          <InputNumber v-model="minAmountModel" mode="currency" currency="BRL" locale="pt-BR" :min="0" placeholder="R$ 0,00" class="w-full" />
         </div>
 
         <div>
           <label class="mb-1 block text-xs font-medium text-sepia-700">Valor máximo</label>
-          <input v-model="filters.max_amount" type="number" step="0.01" min="0" placeholder="Sem limite" :class="inputClass">
+          <InputNumber v-model="maxAmountModel" mode="currency" currency="BRL" locale="pt-BR" placeholder="Sem limite" class="w-full" />
         </div>
       </div>
 
       <div class="mt-3 flex justify-end">
-        <button
-          type="button"
+        <Button
           :disabled="!hasActiveFilter"
-          class="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg bg-sepia-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-sepia-950 disabled:opacity-40"
+          class="!inline-flex !items-center !gap-1.5 !whitespace-nowrap !rounded-lg !bg-sepia-900 !px-3 !py-1.5 !text-xs !font-medium !text-white hover:!bg-sepia-950 disabled:!opacity-40"
           @click="clearFilters"
         >
           <Icon icon="mdi:filter-remove-outline" class="h-4 w-4" />
           Limpar filtros
-        </button>
+        </Button>
       </div>
     </div>
 
@@ -573,56 +613,63 @@ const inputClass
             <td v-if="isColumnVisible('category')" class="px-4 py-3">
               <div v-if="editingCategoryId === tx.id" class="flex flex-col gap-1">
                 <div class="flex items-center gap-1">
-                  <input
+                  <InputText
                     :ref="setCategoryInputEl"
                     v-model="editingCategoryValue"
                     type="text"
                     list="category-suggestions"
                     :disabled="savingCategory"
-                    class="w-32 rounded border border-sepia-300 bg-white px-1.5 py-0.5 text-xs focus:border-sepia-500 focus:outline-none"
+                    class="w-32 !px-1.5 !py-0.5 !text-xs"
                     @keydown.enter="saveCategory(tx)"
                     @keydown.escape="cancelEditingCategory"
-                  >
-                  <button
-                    type="button"
+                  />
+                  <Button
+                    text
+                    rounded
+                    size="small"
                     :disabled="savingCategory"
-                    class="shrink-0 text-azul-600 hover:text-azul-700 disabled:opacity-40"
+                    class="shrink-0 !text-azul-600 hover:!text-azul-700 disabled:!opacity-40"
                     title="Salvar"
                     @click="saveCategory(tx)"
                   >
                     <Icon icon="mdi:check" class="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
+                  </Button>
+                  <Button
+                    text
+                    rounded
+                    size="small"
                     :disabled="savingCategory"
-                    class="shrink-0 text-sepia-400 hover:text-sepia-600 disabled:opacity-40"
+                    class="shrink-0 !text-sepia-400 hover:!text-sepia-600 disabled:!opacity-40"
                     title="Cancelar"
                     @click="cancelEditingCategory"
                   >
                     <Icon icon="mdi:close" class="h-4 w-4" />
-                  </button>
+                  </Button>
                 </div>
                 <p v-if="categoryError" class="text-[10px] leading-tight text-vermelho-600">{{ categoryError }}</p>
               </div>
               <div v-else class="group flex items-center gap-1">
-                <button
-                  type="button"
-                  class="inline-flex items-center gap-1 whitespace-nowrap rounded bg-sepia-100 px-2 py-0.5 text-xs text-sepia-600 hover:bg-sepia-200"
+                <Button
+                  text
+                  size="small"
+                  class="!inline-flex !items-center !gap-1 !whitespace-nowrap !rounded !bg-sepia-100 !px-2 !py-0.5 !text-xs !text-sepia-600 hover:!bg-sepia-200"
                   title="Clique para editar a categoria"
                   @click="startEditingCategory(tx)"
                 >
                   {{ tx.category || 'Sem categoria' }}
                   <Icon v-if="tx.category_is_manual" icon="mdi:pencil" class="h-3 w-3 text-sepia-400" />
-                </button>
-                <button
+                </Button>
+                <Button
                   v-if="tx.category_is_manual"
-                  type="button"
-                  class="shrink-0 text-sepia-300 opacity-0 hover:text-sepia-500 group-hover:opacity-100"
+                  text
+                  rounded
+                  size="small"
+                  class="shrink-0 !text-sepia-300 opacity-0 hover:!text-sepia-500 group-hover:opacity-100"
                   title="Restaurar categoria automática"
                   @click="resetCategory(tx)"
                 >
                   <Icon icon="mdi:restore" class="h-3.5 w-3.5" />
-                </button>
+                </Button>
               </div>
             </td>
             <td v-if="isColumnVisible('type')" class="px-4 py-3">
@@ -638,23 +685,21 @@ const inputClass
       </table>
 
       <div v-if="totalPages > 1" class="flex items-center justify-between border-t border-sepia-200 px-4 py-3">
-        <button
-          type="button"
+        <Button
           :disabled="!hasPrevious || loading"
-          class="whitespace-nowrap rounded-lg bg-sepia-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-sepia-950 disabled:opacity-40"
+          class="!whitespace-nowrap !rounded-lg !bg-sepia-900 !px-3 !py-1.5 !text-xs !font-medium !text-white hover:!bg-sepia-950 disabled:!opacity-40"
           @click="previous"
         >
           Anterior
-        </button>
+        </Button>
         <span class="text-xs text-sepia-500">Página {{ page }} de {{ totalPages }}</span>
-        <button
-          type="button"
+        <Button
           :disabled="!hasNext || loading"
-          class="whitespace-nowrap rounded-lg bg-sepia-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-sepia-950 disabled:opacity-40"
+          class="!whitespace-nowrap !rounded-lg !bg-sepia-900 !px-3 !py-1.5 !text-xs !font-medium !text-white hover:!bg-sepia-950 disabled:!opacity-40"
           @click="next"
         >
           Próxima
-        </button>
+        </Button>
       </div>
     </div>
 

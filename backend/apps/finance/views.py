@@ -11,6 +11,7 @@ from django.db import transaction as db_transaction
 from django.db.models import Prefetch, Q
 from django.http import StreamingHttpResponse
 from django.utils import timezone
+from django_gravatar.helpers import get_gravatar_url
 from rest_framework import permissions, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
@@ -125,6 +126,7 @@ class CurrentUserAPIView(APIView):
                 "email": user.email,
                 "first_name": user.first_name,
                 "last_name": user.last_name,
+                "avatar_url": get_gravatar_url(user.email),
             }
         )
 

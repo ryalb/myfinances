@@ -65,8 +65,11 @@ INSTALLED_APPS = [
     "rest_framework.authtoken",
     "graphene_django",
     "channels",
+    "django_gravatar",
     "apps.finance.apps.FinanceConfig",
 ]
+
+GRAVATAR_DEFAULT_IMAGE = "identicon"
 
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",

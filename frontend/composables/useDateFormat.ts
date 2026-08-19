@@ -27,3 +27,11 @@ export function formatIsoDateTime(value: string | null | undefined): string {
   const d = new Date(value)
   return `${formatIsoDateOnly(value)} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
+
+// Sentido contrário de `formatIsoDateOnly`: um `Date` (ex.: saída de um
+// `DatePicker` do PrimeVue, que trabalha em `Date`, não em string) de volta
+// para "YYYY-MM-DD" -- formato que o backend, a exportação CSV e a
+// localStorage dos filtros esperam.
+export function toIsoDateString(date: Date): string {
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}

@@ -351,6 +351,15 @@ wheels = [
 ]
 
 [[package]]
+name = "django-gravatar2"
+version = "1.4.5"
+source = { registry = "https://pypi.apple.com/simple" }
+sdist = { url = "https://pypi.apple.com/packages/packages/7c/51/e3a278d7f9a505abeccf7b12995b1d24c3f22657fee30ac39ca5b64af293/django_gravatar2-1.4.5.tar.gz", hash = "sha256:2dbb56465e395dd8b3920d4017e27a4756912cc2ad9b11ba48cf143871a80364", size = 10444, upload-time = "2024-08-29T22:34:16.818Z" }
+wheels = [
+    { url = "https://pypi.apple.com/packages/packages/95/e3/22cd408d91f1732582dc266654e8cbc10a5e8c9e8036f299e70bea6827ea/django_gravatar2-1.4.5-py2.py3-none-any.whl", hash = "sha256:7e6c8f63f59b0077d42402531684807ea6295867ebd2195a638d87b851f0d41c", size = 8180, upload-time = "2024-08-29T22:34:15.655Z" },
+]
+
+[[package]]
 name = "djangorestframework"
 version = "3.17.1"
 source = { registry = "https://pypi.apple.com/simple" }
@@ -550,6 +559,7 @@ dependencies = [
     { name = "daphne" },
     { name = "django" },
     { name = "django-cors-headers" },
+    { name = "django-gravatar2" },
     { name = "djangorestframework" },
     { name = "djangorestframework-simplejwt" },
     { name = "graphene-django" },
@@ -580,6 +590,7 @@ requires-dist = [
     { name = "daphne", specifier = ">=4.0.0" },
     { name = "django", specifier = ">=5.1,<6.0" },
     { name = "django-cors-headers", specifier = ">=4.4,<5.0" },
+    { name = "django-gravatar2", specifier = ">=1.4.5" },
     { name = "djangorestframework", specifier = ">=3.15,<4.0" },
     { name = "djangorestframework-simplejwt", specifier = ">=5.3,<6.0" },
     { name = "graphene-django", specifier = ">=3.2,<4.0" },

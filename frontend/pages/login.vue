@@ -53,20 +53,20 @@ const handleSubmit = async () => {
           Contas, cartões, investimentos e previdência — conectados via Open Finance e atualizados sozinhos.
         </p>
 
-        <dl class="mt-8 space-y-3 border-t border-sepia-800 pt-6">
-          <div class="flex items-center justify-between text-sm">
-            <dt class="text-sepia-400">Patrimônio líquido</dt>
-            <dd class="font-mono text-sepia-100">R$ 214.870,00</dd>
-          </div>
-          <div class="flex items-center justify-between text-sm">
-            <dt class="text-sepia-400">Investimentos</dt>
-            <dd class="font-mono text-sepia-100">R$ 96.430,00</dd>
-          </div>
-          <div class="flex items-center justify-between border-b-2 border-double border-sepia-700 pb-3 text-sm">
-            <dt class="text-sepia-400">Taxa de poupança no mês</dt>
-            <dd class="font-mono text-azul-300">28,4%</dd>
-          </div>
-        </dl>
+        <ul class="mt-8 space-y-3 border-t border-sepia-800 pt-6 text-sm text-sepia-300">
+          <li class="flex items-center gap-2">
+            <Icon icon="mdi:check" class="h-4 w-4 text-azul-300" />
+            Contas, cartões e investimentos num só lugar
+          </li>
+          <li class="flex items-center gap-2">
+            <Icon icon="mdi:check" class="h-4 w-4 text-azul-300" />
+            Projeção de liberdade financeira
+          </li>
+          <li class="flex items-center gap-2">
+            <Icon icon="mdi:check" class="h-4 w-4 text-azul-300" />
+            Sincronização automática, sem planilhas
+          </li>
+        </ul>
       </div>
 
       <p class="text-xs text-sepia-500">Dados protegidos e sincronizados via Open Finance.</p>
