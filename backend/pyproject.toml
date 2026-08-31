@@ -39,6 +39,11 @@ python_files = ["test_*.py"]
 testpaths = ["apps"]
 addopts = "--reuse-db"
 
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple"
+default = true
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"

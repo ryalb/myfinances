@@ -43,7 +43,7 @@ EXPECTED_QUERY_FIELDS = {
     "futureProjection",
     "financialHealthScore",
     "portfolioAllocationDrift",
-    "untaggedInvestments",
+    "reclassifiableInvestments",
     "taggableCashAccounts",
     "budgetBucketDrift",
 }

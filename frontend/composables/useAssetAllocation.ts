@@ -7,31 +7,34 @@ export type AllocationDriftRow = {
   driftPp: number
 }
 
-export type UntaggedInvestment = {
+export type ReclassifiableInvestment = {
   id: number
   name: string
   kind: string
+  assetClass: string
+  tagId: number | null
 }
 
 export type TaggableAccount = {
   id: number
   name: string
   type: string
+  tagId: number | null
 }
 
 type AllocationData = {
   drift: AllocationDriftRow[]
-  untaggedInvestments: UntaggedInvestment[]
+  reclassifiableInvestments: ReclassifiableInvestment[]
   taggableCashAccounts: TaggableAccount[]
 }
 
 const ALLOCATION_QUERY = `{
   portfolioAllocationDrift { assetClass label targetPercentage actualPercentage actualAmount driftPp }
-  untaggedInvestments { id name kind }
-  taggableCashAccounts { id name type }
+  reclassifiableInvestments { id name kind assetClass tagId }
+  taggableCashAccounts { id name type tagId }
 }`
 
-const EMPTY: AllocationData = { drift: [], untaggedInvestments: [], taggableCashAccounts: [] }
+const EMPTY: AllocationData = { drift: [], reclassifiableInvestments: [], taggableCashAccounts: [] }
 
 export function useAssetAllocation() {
   const { graphql } = useApi()
@@ -44,7 +47,7 @@ export function useAssetAllocation() {
       )
       return {
         drift: res?.data?.portfolioAllocationDrift ?? [],
-        untaggedInvestments: res?.data?.untaggedInvestments ?? [],
+        reclassifiableInvestments: res?.data?.reclassifiableInvestments ?? [],
         taggableCashAccounts: res?.data?.taggableCashAccounts ?? [],
       }
     },

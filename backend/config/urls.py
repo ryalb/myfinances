@@ -9,8 +9,10 @@ from apps.finance.views import (
     BudgetBucketTargetsAPIView,
     CardViewSet,
     CategorizationRuleViewSet,
+    ChatAPIView,
     ConnectionViewSet,
     CurrentUserAPIView,
+    ExecutiveReportAPIView,
     FinanceTagViewSet,
     FinancialGoalViewSet,
     FinancialInstitutionViewSet,
@@ -130,6 +132,16 @@ urlpatterns = [
         "api/v1/ai/portfolio-builder/",
         PortfolioBuilderAPIView.as_view(),
         name="portfolio-builder-report",
+    ),
+    path(
+        "api/v1/ai/executive-report/",
+        ExecutiveReportAPIView.as_view(),
+        name="executive-report",
+    ),
+    path(
+        "api/v1/ai/chat/",
+        ChatAPIView.as_view(),
+        name="ai-chat",
     ),
     path("graphql/", JWTGraphQLView.as_view(graphiql=True)),
 ]

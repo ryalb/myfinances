@@ -23,6 +23,7 @@ from .models import (
     Account,
     Card,
     CategorizationRule,
+    ChatMessageRole,
     Connection,
     DocumentChunk,
     DocumentChunkStatus,
@@ -43,6 +44,11 @@ logger = logging.getLogger(__name__)
 SUMMARY_SOURCE_TYPE = "financial_summary"
 
 TRANSACTION_MONTHS = 6
+
+# Quantas mensagens anteriores entram no prompt como memoria da conversa. Maior
+# que isso e o prompt cresce sem necessidade -- a maioria das perguntas de
+# acompanhamento se refere so aos ultimos turnos.
+CHAT_HISTORY_LIMIT = 12
 
 
 class AIServiceUnavailable(RuntimeError):
@@ -73,6 +79,12 @@ PROJECTION_LIST_FIELDS = ("leverage_explanation", "goal_commentary")
 # numeros vem de `allocation.build_allocation_drift`, a LLM so recomenda.
 GUIDANCE_TEXT_FIELDS = ("guidance",)
 GUIDANCE_LIST_FIELDS = ("rebalancing_actions", "common_mistakes")
+
+# Mesmo contrato, para a sintese do relatorio executivo -- os numeros vem de
+# `allocation.build_allocation_drift`/`build_contribution_plan` e
+# `projections.build_future_projection`, a LLM so avalia e narra.
+EXECUTIVE_TEXT_FIELDS = ("summary",)
+EXECUTIVE_LIST_FIELDS = ("goal_fit", "performance_verdict", "contribution_rationale")
 
 # Hosts considerados locais. `ollama` e o nome do servico no docker-compose.
 LOCAL_INFERENCE_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "0.0.0.0", "ollama"})
@@ -198,6 +210,19 @@ def normalize_portfolio_guidance(raw) -> dict:
         guidance[key] = _as_list(source.get(key))
     guidance["disclaimer"] = REPORT_DISCLAIMER
     return guidance
+
+
+def normalize_executive_report(raw) -> dict:
+    """Mesma normalizacao de `normalize_report`, para o contrato da sintese do
+    relatorio executivo (chaves e formato diferentes)."""
+    source = raw if isinstance(raw, dict) else {}
+    report: dict[str, object] = {}
+    for key in EXECUTIVE_TEXT_FIELDS:
+        report[key] = _as_text(source.get(key))
+    for key in EXECUTIVE_LIST_FIELDS:
+        report[key] = _as_list(source.get(key))
+    report["disclaimer"] = REPORT_DISCLAIMER
+    return report
 
 
 @dataclass(frozen=True)
@@ -605,6 +630,24 @@ def _build_allocation_document(user) -> Document | None:
     )
 
 
+def _render_contribution_plan_lines(plan: list[dict]) -> list[str]:
+    """Linhas em pt-BR do plano de aporte, uma por classe de ativo.
+
+    Mesmo raciocinio de `_render_allocation_lines`/`_render_projection_lines`:
+    reaproveitada apenas pelo prompt de `LLMService.generate_executive_report`
+    -- o plano de aporte nao tem documento indexavel proprio, so existe no
+    momento em que o relatorio executivo e gerado.
+    """
+    lines = []
+    for row in plan:
+        lines.append(
+            f"- {row['label']}: alvo {row['target_percentage']:.1f}%, atual "
+            f"{row['actual_percentage']:.1f}% ({_format_amount(row['actual_amount'])}), "
+            f"sugestao de aporte {_format_amount(row['suggested_amount'])}"
+        )
+    return lines
+
+
 def _build_subscriptions_document(user) -> Document | None:
     overview = build_subscription_overview(user)
     if not overview["active_count"]:
@@ -879,6 +922,54 @@ def _ollama_post(url: str, payload: dict, *, model: str, timeout: int) -> dict:
         ) from exc
 
 
+def _ollama_stream_lines(url: str, payload: dict, *, model: str, timeout: int):
+    """Abre uma chamada em streaming ao Ollama, com o mesmo erro acionavel de
+    `_ollama_post`.
+
+    A checagem de status acontece aqui, antes de qualquer byte do corpo ser
+    consumido (`requests` ja recebeu os headers nesse ponto, mesmo com
+    `stream=True`) -- por isso o chamador pode tratar `AIServiceUnavailable` de
+    forma sincrona e responder 503 antes de abrir um `StreamingHttpResponse`
+    que falharia no meio, sem chance de trocar o status code.
+    """
+    try:
+        response = requests.post(url, json=payload, timeout=timeout, stream=True)
+    except requests.RequestException as exc:
+        raise AIServiceUnavailable(f"Nao foi possivel falar com o Ollama em {url}: {exc}") from exc
+
+    if response.status_code >= 400:
+        detail = _ollama_error_detail(response)
+        hint = ""
+        if "not found" in detail.lower():
+            hint = (
+                f" Rode `ollama pull {model}`"
+                f" (ou `docker compose exec ollama ollama pull {model}`)."
+            )
+        raise AIServiceUnavailable(
+            f"Ollama respondeu {response.status_code} para o modelo '{model}': {detail}.{hint}"
+        )
+
+    return response.iter_lines(decode_unicode=True)
+
+
+def _iter_ollama_stream_text(lines):
+    """Extrai o texto incremental de um stream ndjson do Ollama
+    (`{"response": "...", "done": false}` por linha), parando no `done: true`.
+    """
+    for line in lines:
+        if not line:
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        chunk = payload.get("response", "")
+        if chunk:
+            yield chunk
+        if payload.get("done"):
+            break
+
+
 class RAGService:
     def __init__(self) -> None:
         self.ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
@@ -1064,6 +1155,63 @@ class RAGService:
             )
             if anchor:
                 context.append({"chunk": anchor[0].chunk, "similarity": 1.0})
+        return context
+
+    def retrieve_executive_report_context(self, user) -> list[dict]:
+        """Contexto para a sintese do relatorio executivo.
+
+        Uniao dos dominios ancorados pelos tres relatorios que este sintetiza
+        (`retrieve_report_context`, `retrieve_future_projection_context`,
+        `retrieve_portfolio_builder_context`): resumo patrimonial, investimentos
+        (performance/concentracao), metas, simulacao de futuro financeiro e
+        alocacao de portfolio. Sem busca por similaridade, mesmo motivo dos
+        outros dois relatorios "so narram numeros ja calculados" -- as tres
+        perguntas do usuario (a alocacao faz sentido pra meta, o rendimento
+        esta bom, quanto aportar) dependem desses cinco dominios sempre, nunca
+        de uma pergunta livre.
+        """
+        anchor_types = (
+            SUMMARY_SOURCE_TYPE,
+            "investments",
+            "goals",
+            "future_projection",
+            "portfolio_allocation",
+        )
+        context = []
+        for source_type in anchor_types:
+            anchor = list(
+                Embedding.objects.filter(
+                    chunk__user=user,
+                    chunk__status=DocumentChunkStatus.INDEXED,
+                    chunk__source_type=source_type,
+                ).select_related("chunk")[:1]
+            )
+            if anchor:
+                context.append({"chunk": anchor[0].chunk, "similarity": 1.0})
+        return context
+
+    def retrieve_chat_context(self, user, query: str, top_k: int = 6) -> list[dict]:
+        """Contexto do chat de IA.
+
+        Sem dominio fixo como os outros relatorios: o chat responde sobre
+        qualquer coisa indexada (contas, cartoes, investimentos, transacoes,
+        assinaturas...), entao so o resumo patrimonial e ancorado -- o resto
+        vem inteiramente da busca semantica pela mensagem do usuario.
+        """
+        context = []
+        anchor = list(
+            Embedding.objects.filter(
+                chunk__user=user,
+                chunk__status=DocumentChunkStatus.INDEXED,
+                chunk__source_type=SUMMARY_SOURCE_TYPE,
+            ).select_related("chunk")[:1]
+        )
+        if anchor:
+            context.append({"chunk": anchor[0].chunk, "similarity": 1.0})
+
+        for item in self.search(user, query, top_k=top_k):
+            if item["chunk"].source_type != SUMMARY_SOURCE_TYPE:
+                context.append(item)
         return context
 
 
@@ -1291,3 +1439,155 @@ class LLMService:
         ]
         return guidance
 
+    def generate_executive_report(
+        self,
+        context_chunks: list[dict],
+        drift: list[dict],
+        projection: dict,
+        contribution_plan: list[dict],
+    ) -> dict:
+        """Sintese em pt-BR das tres perguntas do relatorio executivo: a alocacao
+        atual faz sentido para as metas, o rendimento esta bom ou vale mudar de
+        aplicacao, e quanto aportar em cada classe no proximo aporte.
+
+        `drift` (`allocation.build_allocation_drift`), `projection`
+        (`projections.serialize_future_projection`) e `contribution_plan`
+        (`allocation.build_contribution_plan`) ja foram calculados por codigo
+        deterministico; a LLM so avalia e narra, nunca recalcula -- mesmo
+        raciocinio de `generate_future_projection_narrative` e
+        `generate_portfolio_builder_guidance`, que este metodo sintetiza.
+        """
+        context_text = "\n\n".join(
+            f"[Fonte: {item['chunk'].source_type}/{item['chunk'].source_id}]\n"
+            f"{item['chunk'].content}"
+            for item in context_chunks
+            if item.get("chunk")
+        )
+        drift_text = "\n".join(_render_allocation_lines(drift))
+        projection_text = "\n".join(_render_projection_lines(projection))
+        plan_text = "\n".join(_render_contribution_plan_lines(contribution_plan))
+
+        prompt = (
+            "Você é um consultor financeiro que responde de forma direta e objetiva "
+            "três perguntas do usuário sobre a própria carteira, no estilo Bogleheads "
+            "(baixo custo, diversificação ampla, buy-and-hold). Todos os números abaixo "
+            "já foram calculados por código determinístico; sua tarefa é apenas avaliar "
+            "e explicar, nunca recalcular ou inventar valores diferentes dos fornecidos.\n\n"
+            "Regras obrigatórias:\n"
+            "- Use apenas os números e o contexto abaixo; não invente valores, "
+            "instituições, fundos ou tickers.\n"
+            "- Formate valores monetários no padrão brasileiro: separador de milhar '.', "
+            "separador decimal ',' e prefixo 'R$ ' (ex.: R$ 1.234,56). Nunca use o padrão "
+            "americano (1,234.56).\n"
+            "- Nunca cite ticker ou nome de fundo específico, pois você não tem acesso a "
+            "dados de mercado atualizados; fale em classes de ativo (ex.: renda fixa, "
+            "Tesouro Direto, fundo multimercado, ações internacionais).\n"
+            "- Cada item das listas deve ser uma frase única em texto simples (string), "
+            "nunca um objeto ou par chave/valor.\n\n"
+            f"Alocação (alvo x atual):\n{drift_text}\n\n"
+            f"Simulação de futuro financeiro e viabilidade de metas:\n{projection_text}\n\n"
+            f"Plano de aporte sugerido para o próximo aporte:\n{plan_text}\n\n"
+            f"Contexto adicional:\n{context_text}\n\n"
+            "Retorne um JSON com as chaves:\n"
+            "- summary: texto corrido (string) respondendo de forma direta se a carteira "
+            "atual faz sentido para os objetivos do usuário\n"
+            "- goal_fit: lista de frases avaliando, para cada meta com data-alvo listada "
+            "na simulação, se a alocação atual ajuda a alcançá-la (cruze a viabilidade da "
+            "meta com a alocação e a concentração por tipo de ativo); lista vazia se não "
+            "houver meta com data-alvo\n"
+            "- performance_verdict: lista de frases avaliando a rentabilidade de cada "
+            "investimento ou classe de ativo (use a variação de cota, rentabilidade do "
+            "mês/ano e concentração do contexto de investimentos) e sinalizando quando "
+            "vale considerar mover recursos para outra classe, sem citar fundo específico\n"
+            "- contribution_rationale: lista de frases explicando o motivo do valor "
+            "sugerido de aporte em cada classe do plano acima, sem alterar os valores\n"
+        )
+
+        payload = _ollama_post(
+            f"{self.ollama_url}/api/generate",
+            {
+                "model": self.chat_model,
+                "prompt": prompt,
+                "stream": False,
+                "format": "json",
+                "options": {"temperature": 0.2},
+            },
+            model=self.chat_model,
+            timeout=300,
+        )
+
+        content = payload.get("response", "{}")
+        try:
+            raw = json.loads(content)
+        except json.JSONDecodeError:
+            raw = {"summary": content}
+
+        report = normalize_executive_report(raw)
+        report["sources"] = [
+            {
+                "source_type": item["chunk"].source_type,
+                "source_id": item["chunk"].source_id,
+                "similarity": round(item["similarity"], 4),
+            }
+            for item in context_chunks
+            if item.get("chunk")
+        ]
+        return report
+
+    def stream_chat_reply(self, context_chunks: list[dict], history: list, message: str):
+        """Resposta conversacional em streaming, com memoria dos ultimos turnos.
+
+        Ao contrario dos outros metodos desta classe, a resposta e texto livre
+        (sem `format=json`): um chat nao tem um contrato de chaves fixas para a
+        UI renderizar, so mostra o texto conforme chega. A checagem de conexao
+        com o Ollama acontece de forma sincrona antes deste metodo devolver o
+        gerador (dentro de `_ollama_stream_lines`), para o chamador poder
+        responder 503 em vez de abrir um `StreamingHttpResponse` que falharia
+        no meio.
+        """
+        context_text = "\n\n".join(
+            f"[Fonte: {item['chunk'].source_type}/{item['chunk'].source_id}]\n"
+            f"{item['chunk'].content}"
+            for item in context_chunks
+            if item.get("chunk")
+        )
+        history_text = "\n".join(
+            f"{'Usuário' if entry.role == ChatMessageRole.USER else 'Assistente'}: {entry.content}"
+            for entry in history
+        )
+
+        prompt = (
+            "Você é um assistente financeiro pessoal, conversando em português do "
+            "Brasil sobre os dados financeiros do próprio usuário.\n\n"
+            "Regras obrigatórias:\n"
+            "- Use apenas os dados fornecidos abaixo; nunca invente saldos, valores, "
+            "instituições, fundos ou tickers.\n"
+            "- Se a pergunta não puder ser respondida com os dados fornecidos, diga "
+            "isso claramente em vez de inventar uma resposta.\n"
+            "- Formate valores monetários no padrão brasileiro: separador de milhar "
+            "'.', separador decimal ',' e prefixo 'R$ ' (ex.: R$ 1.234,56). Nunca use "
+            "o padrão americano (1,234.56).\n"
+            "- Isto não é recomendação de investimento; ao sugerir algo, fale em "
+            "classes de ativo (ex.: Tesouro Selic, fundo multimercado, ETF de ações), "
+            "nunca cite fundo ou ticker específico, pois você não tem dados de "
+            "mercado atualizados.\n"
+            "- Responda de forma direta e natural, como numa conversa, sem repetir a "
+            "pergunta nem devolver JSON.\n\n"
+            f"Dados financeiros do usuário:\n{context_text}\n\n"
+        )
+        if history_text:
+            prompt += f"Histórico da conversa:\n{history_text}\n\n"
+        prompt += f"Usuário: {message}\nAssistente:"
+
+        lines = _ollama_stream_lines(
+            f"{self.ollama_url}/api/generate",
+            {
+                "model": self.chat_model,
+                "prompt": prompt,
+                "stream": True,
+                "options": {"temperature": 0.3},
+            },
+            model=self.chat_model,
+            timeout=300,
+        )
+        return _iter_ollama_stream_text(lines)

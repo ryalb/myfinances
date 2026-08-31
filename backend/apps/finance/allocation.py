@@ -6,7 +6,7 @@ para separar previdencia) com uma tag do usuario (`FinanceTag`) tendo
 precedencia quando o dado da Pluggy e ambiguo.
 """
 
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import TypedDict
 
 from .consolidation import latest_positions_by_investment
@@ -31,8 +31,6 @@ KIND_TO_ASSET_CLASS: dict[str, str] = {
     "FIXED_INCOME": AssetClass.FIXED_INCOME,
     "EQUITY": AssetClass.EQUITY_BR,
 }
-
-AMBIGUOUS_KINDS = frozenset({"MUTUAL_FUND", "ETF", "COE"})
 
 
 class AllocationAmount(TypedDict):
@@ -178,35 +176,189 @@ def serialize_allocation_drift(rows: list[DriftRow]) -> list[dict]:
     ]
 
 
-def untagged_investments(user) -> list[Investment]:
-    """Investimentos cujo `kind` cai numa classe ambigua e ainda nao tem tag.
+class ContributionRow(TypedDict):
+    asset_class: str
+    label: str
+    target_percentage: Decimal
+    actual_percentage: Decimal
+    actual_amount: Decimal
+    suggested_amount: Decimal
 
-    A tela do construtor de portfolio usa isto para pedir ao usuario que
-    classifique manualmente o que `classify_investment_asset_class` nao
-    resolveria com confianca sozinho.
+
+def build_contribution_plan(user, amount: Decimal) -> list[ContributionRow]:
+    """Distribui um aporte novo entre as classes de `build_allocation_drift`
+    para reduzir o desvio ("rebalancear com dinheiro novo", Bogleheads), em vez
+    de sugerir venda de posicoes existentes.
+
+    Por classe, `needed` e o quanto falta para ela chegar ao alvo considerando
+    o total *depois* do aporte (`target% * (total_atual + amount)`). Se a soma
+    de `needed` cabe no aporte, cada classe subalocada recebe exatamente seu
+    `needed` e o restante e rateado por `target_percentage` (todas as classes
+    ja no alvo ou acima -- o resto so tem para onde ir pelo peso do alvo). Se
+    nao cabe, o aporte inteiro e rateado proporcionalmente ao `needed` de cada
+    classe -- nenhuma cobre 100% do proprio deficit.
+
+    Contrato: nunca lanca excecao. `drift` vazio ou `amount <= 0` retornam
+    `[]` -- a chamada so faz sentido com pelo menos uma classe e algum valor a
+    aportar.
     """
-    tagged_ids = set(
-        FinanceTag.objects.filter(
-            user=user, kind=FinanceTagKind.ASSET_CLASS, investment__isnull=False
-        ).values_list("investment_id", flat=True)
-    )
+    drift = build_allocation_drift(user)
+    if not drift or amount <= 0:
+        return []
+
+    total_actual = sum((row["actual_amount"] for row in drift), Decimal("0"))
+    needed_by_class = {
+        row["asset_class"]: max(
+            Decimal("0"),
+            row["target_percentage"] / Decimal("100") * (total_actual + amount)
+            - row["actual_amount"],
+        )
+        for row in drift
+    }
+    total_needed = sum(needed_by_class.values(), Decimal("0"))
+
+    allocated: dict[str, Decimal] = {}
+    if total_needed <= amount:
+        remainder = amount - total_needed
+        total_target_pct = sum((row["target_percentage"] for row in drift), Decimal("0"))
+        for row in drift:
+            asset_class = row["asset_class"]
+            if total_target_pct > 0:
+                extra = remainder * row["target_percentage"] / total_target_pct
+            else:
+                # Nenhum alvo definido (ou todos 0%): sem peso para ratear por
+                # alvo, divide igualmente em vez de dividir por zero. A view
+                # pede para o usuario definir alvos antes de chegar aqui, mas
+                # esta funcao nao deve lancar de qualquer forma.
+                extra = remainder / Decimal(len(drift))
+            allocated[asset_class] = needed_by_class[asset_class] + extra
+    else:
+        # total_needed > amount >= 0 implica total_needed > 0: denominador
+        # nunca e zero neste ramo.
+        for row in drift:
+            asset_class = row["asset_class"]
+            allocated[asset_class] = amount * needed_by_class[asset_class] / total_needed
+
+    rounded = {
+        asset_class: value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        for asset_class, value in allocated.items()
+    }
+    # O arredondamento por linha pode nao somar exatamente `amount` -- ajusta a
+    # maior linha pelo residuo para a soma das sugestoes bater com o valor que
+    # o usuario efetivamente vai aportar.
+    target_total = amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    residual = target_total - sum(rounded.values(), Decimal("0"))
+    if residual != 0:
+        largest_class = max(rounded, key=lambda key: rounded[key])
+        rounded[largest_class] += residual
+
     return [
-        investment
-        for investment in Investment.objects.filter(connection__user=user)
-        if investment.kind.upper() in AMBIGUOUS_KINDS and investment.pk not in tagged_ids
+        {
+            "asset_class": row["asset_class"],
+            "label": row["label"],
+            "target_percentage": row["target_percentage"],
+            "actual_percentage": row["actual_percentage"],
+            "actual_amount": row["actual_amount"],
+            "suggested_amount": rounded[row["asset_class"]],
+        }
+        for row in drift
     ]
 
 
-def taggable_cash_accounts(user) -> list[Account]:
-    """Contas correntes/poupança que o usuário pode marcar como reserva de emergência.
+def serialize_contribution_plan(rows: list[ContributionRow]) -> list[dict]:
+    """Forma JSON-segura (float) de `build_contribution_plan`.
+
+    Mesmo raciocinio de `serialize_allocation_drift`.
+    """
+    return [
+        {
+            "asset_class": row["asset_class"],
+            "label": row["label"],
+            "target_percentage": float(row["target_percentage"]),
+            "actual_percentage": float(row["actual_percentage"]),
+            "actual_amount": float(row["actual_amount"]),
+            "suggested_amount": float(row["suggested_amount"]),
+        }
+        for row in rows
+    ]
+
+
+class ReclassifiableInvestment(TypedDict):
+    id: int
+    name: str
+    kind: str
+    asset_class: str
+    tag_id: int | None
+
+
+def reclassifiable_investments(user) -> list[ReclassifiableInvestment]:
+    """Todos os investimentos do usuario com a classe efetiva atual (tag >
+    `kind` inferido) e o id da tag, se houver.
+
+    A tela do construtor de portfolio usa isto para deixar qualquer
+    investimento ser reclassificado manualmente -- nao so os de `kind`
+    ambiguo -- porque uma aplicacao com `kind` nao-ambiguo (ex: renda fixa)
+    pode mesmo assim ser a reserva de emergencia do usuario. `tag_id` presente
+    permite a tela oferecer "remover classificacao" e voltar ao default
+    inferido.
+    """
+    tags_by_investment_id = {
+        tag.investment_id: tag
+        for tag in FinanceTag.objects.filter(
+            user=user, kind=FinanceTagKind.ASSET_CLASS, investment__isnull=False
+        )
+    }
+    result: list[ReclassifiableInvestment] = []
+    for investment in Investment.objects.filter(connection__user=user).order_by("name"):
+        tag = tags_by_investment_id.get(investment.pk)
+        result.append(
+            {
+                "id": investment.id,
+                "name": investment.name,
+                "kind": investment.kind,
+                "asset_class": classify_investment_asset_class(investment, tag),
+                "tag_id": tag.id if tag is not None else None,
+            }
+        )
+    return result
+
+
+class TaggableAccount(TypedDict):
+    id: int
+    name: str
+    type: str
+    tag_id: int | None
+
+
+def taggable_cash_accounts(user) -> list[TaggableAccount]:
+    """Contas correntes/poupança do usuário, com o id da tag de reserva de
+    emergência se houver.
 
     Só faz sentido oferecer contas de caixa (checking/savings) -- conta de
-    investimento (brokerage) e cartão já entram por outro caminho.
+    investimento (brokerage) e cartão já entram por outro caminho. `tag_id`
+    presente permite a tela oferecer "desmarcar" em vez de só "marcar" --
+    sem isto a conta ficava marcada para sempre, sem controle na UI para
+    reverter.
     """
     from .models import AccountType
 
-    return list(
-        Account.objects.filter(
+    tag_by_account_id = {
+        tag.account_id: tag.id
+        for tag in FinanceTag.objects.filter(
+            user=user,
+            kind=FinanceTagKind.ASSET_CLASS,
+            account__isnull=False,
+            value=AssetClass.CASH_RESERVE,
+        )
+    }
+    return [
+        {
+            "id": account.id,
+            "name": account.name,
+            "type": account.type,
+            "tag_id": tag_by_account_id.get(account.id),
+        }
+        for account in Account.objects.filter(
             connection__user=user, type__in=(AccountType.CHECKING, AccountType.SAVINGS)
         )
-    )
+    ]

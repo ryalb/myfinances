@@ -3,7 +3,7 @@ import hmac
 import logging
 import os
 from datetime import date as date_type
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from uuid import UUID
 
 from django.conf import settings
@@ -20,11 +20,17 @@ from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 from rest_framework_simplejwt.views import TokenObtainPairView
 
-from .allocation import build_allocation_drift, serialize_allocation_drift
+from .allocation import (
+    build_allocation_drift,
+    build_contribution_plan,
+    serialize_allocation_drift,
+    serialize_contribution_plan,
+)
 from .consolidation import (
     build_monthly_cash_flow,
     build_monthly_cash_flow_for_range,
     build_monthly_review_summary,
+    build_recent_month_averages,
     build_transaction_stats,
     build_user_financial_summary,
     snapshot_net_worth,
@@ -40,8 +46,11 @@ from .models import (
     BudgetBucketTarget,
     Card,
     CategorizationRule,
+    ChatMessage,
+    ChatMessageRole,
     Connection,
     ConnectionStatus,
+    ExecutiveReport,
     FinanceTag,
     FinancialGoal,
     FinancialInstitution,
@@ -66,7 +75,9 @@ from .serializers import (
     BudgetBucketTargetSerializer,
     CardSerializer,
     CategorizationRuleSerializer,
+    ChatMessageSerializer,
     ConnectionSerializer,
+    ExecutiveReportSerializer,
     FinanceTagSerializer,
     FinancialGoalSerializer,
     FinancialInstitutionSerializer,
@@ -1157,4 +1168,186 @@ class PortfolioBuilderAPIView(APIView):
         deleted, _ = PortfolioBuilderReport.objects.filter(user=request.user).delete()
         if not deleted:
             return Response({"detail": "Nenhuma orientação para excluir."}, status=404)
+        return Response(status=204)
+
+
+class ExecutiveReportAPIView(APIView):
+    """Sintese de IA das tres perguntas do relatorio executivo
+    (`ai_services.LLMService.generate_executive_report`): a alocacao atual faz
+    sentido para as metas, o rendimento esta bom ou vale mudar de aplicacao, e
+    quanto aportar em cada classe no proximo aporte.
+
+    Mesma estrutura das outras tres views de relatorio de IA: uma sintese por
+    usuario, "Reanalisar" substitui em vez de acumular historico. `contribution_
+    amount` no corpo do POST e opcional -- sem ele, usa a media de poupanca dos
+    ultimos 3 meses (`build_recent_month_averages`, a mesma fonte que
+    `FutureProjectionAPIView` usa como aporte mensal projetado).
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        report = ExecutiveReport.objects.filter(user=request.user).first()
+        if report is None:
+            return Response({"detail": "Nenhum relatório gerado ainda."}, status=404)
+        return Response(ExecutiveReportSerializer(report).data)
+
+    def post(self, request):
+        from .ai_services import AIServiceUnavailable, LLMService, RAGService
+        from .projections import build_future_projection, serialize_future_projection
+
+        drift = serialize_allocation_drift(build_allocation_drift(request.user))
+        if not drift or sum(row["target_percentage"] for row in drift) <= 0:
+            return Response(
+                {
+                    "error": (
+                        "Nao ha alvo de alocacao definido. Defina ao menos um alvo no "
+                        "construtor de portfolio antes de gerar o relatorio executivo."
+                    )
+                },
+                status=422,
+            )
+
+        raw_amount = request.data.get("contribution_amount")
+        if raw_amount in (None, ""):
+            contribution_amount = build_recent_month_averages(request.user, months=3)["savings"]
+        else:
+            try:
+                contribution_amount = Decimal(str(raw_amount))
+            except InvalidOperation:
+                return Response({"error": "Valor de aporte inválido."}, status=400)
+
+        if contribution_amount <= 0:
+            return Response(
+                {
+                    "error": (
+                        "Nao ha poupanca media positiva nos ultimos meses para sugerir um "
+                        "aporte. Informe um valor de aporte manualmente."
+                    )
+                },
+                status=422,
+            )
+
+        contribution_plan = serialize_contribution_plan(
+            build_contribution_plan(request.user, contribution_amount)
+        )
+
+        try:
+            # Construidos dentro do try: a checagem de inferencia local levanta no
+            # __init__, e isso precisa virar 503 e nao 500.
+            rag = RAGService()
+            llm = LLMService()
+
+            index_stats = rag.index_user_context(request.user)
+            projection = serialize_future_projection(build_future_projection(request.user))
+            context = rag.retrieve_executive_report_context(request.user)
+            report = llm.generate_executive_report(context, drift, projection, contribution_plan)
+        except AIServiceUnavailable as exc:
+            logger.warning("Relatorio executivo indisponivel: %s", exc)
+            return Response({"error": str(exc)}, status=503)
+
+        saved, _ = ExecutiveReport.objects.update_or_create(
+            user=request.user,
+            defaults={
+                "contribution_amount": contribution_amount,
+                "contribution_plan": contribution_plan,
+                "summary": report.get("summary", ""),
+                "goal_fit": report.get("goal_fit", []),
+                "performance_verdict": report.get("performance_verdict", []),
+                "contribution_rationale": report.get("contribution_rationale", []),
+                "disclaimer": report.get("disclaimer", ""),
+                "sources": report.get("sources", []),
+            },
+        )
+
+        data = ExecutiveReportSerializer(saved).data
+        data["index"] = index_stats
+        return Response(data)
+
+    def delete(self, request):
+        deleted, _ = ExecutiveReport.objects.filter(user=request.user).delete()
+        if not deleted:
+            return Response({"detail": "Nenhum relatório para excluir."}, status=404)
+        return Response(status=204)
+
+
+class ChatAPIView(APIView):
+    """Chat de IA sobre qualquer dado financeiro indexado, com memoria dos
+    ultimos turnos e resposta em streaming.
+
+    Ao contrario dos quatro relatorios de IA acima (uma analise por usuario que
+    "Reanalisar" substitui), aqui cada POST acrescenta um turno a mesma
+    conversa continua: GET devolve o historico inteiro, DELETE limpa (recomeca
+    do zero).
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        messages = ChatMessage.objects.filter(user=request.user).order_by("created_at")
+        return Response(ChatMessageSerializer(messages, many=True).data)
+
+    def post(self, request):
+        from .ai_services import CHAT_HISTORY_LIMIT, AIServiceUnavailable, LLMService, RAGService
+
+        message = str(request.data.get("message") or "").strip()
+        if not message:
+            return Response({"error": "Mensagem vazia."}, status=400)
+
+        try:
+            # Construidos dentro do try: a checagem de inferencia local levanta
+            # no __init__, e a abertura da conexao de streaming em `stream_
+            # chat_reply` -- as duas precisam virar 503 antes de qualquer
+            # escrita no banco ou de abrir o StreamingHttpResponse.
+            rag = RAGService()
+            llm = LLMService()
+
+            rag.index_user_context(request.user)
+            context = rag.retrieve_chat_context(request.user, message)
+            history = list(
+                ChatMessage.objects.filter(user=request.user).order_by("-created_at")[
+                    :CHAT_HISTORY_LIMIT
+                ]
+            )[::-1]
+            stream = llm.stream_chat_reply(context, history, message)
+        except AIServiceUnavailable as exc:
+            logger.warning("Chat de IA indisponivel: %s", exc)
+            return Response({"error": str(exc)}, status=503)
+
+        ChatMessage.objects.create(user=request.user, role=ChatMessageRole.USER, content=message)
+        sources = [
+            {
+                "source_type": item["chunk"].source_type,
+                "source_id": item["chunk"].source_id,
+                "similarity": round(item["similarity"], 4),
+            }
+            for item in context
+            if item.get("chunk")
+        ]
+
+        def generate():
+            chunks = []
+            try:
+                for piece in stream:
+                    chunks.append(piece)
+                    yield piece
+            finally:
+                # `finally` para persistir mesmo se o cliente cancelar a
+                # conexao no meio -- sem isto uma resposta parcial nunca
+                # aparece no historico, e o usuario perde o que ja foi gerado.
+                content = "".join(chunks)
+                if content:
+                    ChatMessage.objects.create(
+                        user=request.user,
+                        role=ChatMessageRole.ASSISTANT,
+                        content=content,
+                        sources=sources,
+                    )
+
+        return StreamingHttpResponse(generate(), content_type="text/plain; charset=utf-8")
+
+    def delete(self, request):
+        deleted, _ = ChatMessage.objects.filter(user=request.user).delete()
+        if not deleted:
+            return Response({"detail": "Nenhuma conversa para excluir."}, status=404)
         return Response(status=204)

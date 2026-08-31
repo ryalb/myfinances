@@ -15,9 +15,10 @@ from rest_framework.test import APIClient
 from apps.finance.allocation import (
     build_actual_allocation,
     build_allocation_drift,
+    build_contribution_plan,
     classify_investment_asset_class,
+    reclassifiable_investments,
     taggable_cash_accounts,
-    untagged_investments,
 )
 from apps.finance.models import (
     AccountType,
@@ -29,6 +30,7 @@ from apps.finance.models import (
     Investment,
     InvestmentPosition,
     PensionPlan,
+    PortfolioTarget,
 )
 
 TARGETS_URL = "/api/v1/portfolio-targets/"
@@ -192,29 +194,125 @@ def test_allocation_drift_includes_class_with_balance_but_no_target(user, connec
 
 
 # --------------------------------------------------------------------------
-# untagged_investments / taggable_cash_accounts
+# build_contribution_plan
 # --------------------------------------------------------------------------
 
 
 @pytest.mark.django_db
-def test_untagged_investments_lists_only_ambiguous_and_untagged(user, connection):
-    ambiguous = _investment(
-        connection, external_id="inv-1", kind="MUTUAL_FUND", market_value=Decimal("100")
+def test_contribution_plan_returns_empty_when_drift_is_empty(user):
+    assert build_contribution_plan(user, Decimal("500")) == []
+
+
+@pytest.mark.django_db
+def test_contribution_plan_returns_empty_for_non_positive_amount(user, connection):
+    _investment(connection, external_id="inv-1", kind="FIXED_INCOME", market_value=Decimal("1000"))
+
+    assert build_contribution_plan(user, Decimal("0")) == []
+    assert build_contribution_plan(user, Decimal("-100")) == []
+
+
+@pytest.mark.django_db
+def test_contribution_plan_splits_first_contribution_by_target(user):
+    PortfolioTarget.objects.create(
+        user=user, asset_class="fixed_income", target_percentage=Decimal("60")
     )
-    _investment(connection, external_id="inv-2", kind="FIXED_INCOME", market_value=Decimal("100"))
-    tagged_ambiguous = _investment(
+    PortfolioTarget.objects.create(
+        user=user, asset_class="equity_br", target_percentage=Decimal("40")
+    )
+
+    plan = {row["asset_class"]: row for row in build_contribution_plan(user, Decimal("1000"))}
+
+    assert plan[AssetClass.FIXED_INCOME]["suggested_amount"] == Decimal("600.00")
+    assert plan[AssetClass.EQUITY_BR]["suggested_amount"] == Decimal("400.00")
+    assert sum(row["suggested_amount"] for row in plan.values()) == Decimal("1000.00")
+
+
+@pytest.mark.django_db
+def test_contribution_plan_prioritizes_underweight_class_when_insufficient(user, connection):
+    PortfolioTarget.objects.create(
+        user=user, asset_class="fixed_income", target_percentage=Decimal("50")
+    )
+    PortfolioTarget.objects.create(
+        user=user, asset_class="equity_br", target_percentage=Decimal("30")
+    )
+    PortfolioTarget.objects.create(
+        user=user, asset_class="equity_intl", target_percentage=Decimal("20")
+    )
+    _investment(connection, external_id="inv-1", kind="FIXED_INCOME", market_value=Decimal("200"))
+    _investment(connection, external_id="inv-2", kind="EQUITY", market_value=Decimal("800"))
+
+    plan = {row["asset_class"]: row for row in build_contribution_plan(user, Decimal("500"))}
+
+    # equity_br ja esta acima do proprio alvo mesmo depois do aporte -- nao
+    # recebe nada, o aporte inteiro e rateado entre as duas classes carentes.
+    assert plan[AssetClass.EQUITY_BR]["suggested_amount"] == Decimal("0.00")
+    assert plan[AssetClass.FIXED_INCOME]["suggested_amount"] == Decimal("323.53")
+    assert plan[AssetClass.EQUITY_INTL]["suggested_amount"] == Decimal("176.47")
+    assert sum(row["suggested_amount"] for row in plan.values()) == Decimal("500.00")
+
+
+@pytest.mark.django_db
+def test_contribution_plan_spreads_leftover_by_target_after_closing_gaps(user, connection):
+    # Alvo definido so para fixed_income (30%): equity_br entra no drift com
+    # alvo 0% (saldo real sem alvo declarado), e nao deve receber dinheiro
+    # novo mesmo com sobra, porque o usuario nunca pediu alocacao ali.
+    PortfolioTarget.objects.create(
+        user=user, asset_class="fixed_income", target_percentage=Decimal("30")
+    )
+    _investment(connection, external_id="inv-1", kind="FIXED_INCOME", market_value=Decimal("300"))
+    _investment(connection, external_id="inv-2", kind="EQUITY", market_value=Decimal("700"))
+
+    plan = {row["asset_class"]: row for row in build_contribution_plan(user, Decimal("1000"))}
+
+    assert plan[AssetClass.FIXED_INCOME]["suggested_amount"] == Decimal("1000.00")
+    assert plan[AssetClass.EQUITY_BR]["suggested_amount"] == Decimal("0.00")
+
+
+@pytest.mark.django_db
+def test_contribution_plan_without_any_target_splits_evenly_without_dividing_by_zero(
+    user, connection
+):
+    _investment(connection, external_id="inv-1", kind="FIXED_INCOME", market_value=Decimal("1000"))
+    _investment(connection, external_id="inv-2", kind="EQUITY", market_value=Decimal("500"))
+
+    plan = build_contribution_plan(user, Decimal("100.01"))
+
+    amounts = sorted(row["suggested_amount"] for row in plan)
+    assert amounts == [Decimal("50.00"), Decimal("50.01")]
+    assert sum(amounts) == Decimal("100.01")
+
+
+# --------------------------------------------------------------------------
+# reclassifiable_investments / taggable_cash_accounts
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_reclassifiable_investments_lists_every_investment_with_effective_class(user, connection):
+    fixed_income = _investment(
+        connection, external_id="inv-1", kind="FIXED_INCOME", market_value=Decimal("100")
+    )
+    ambiguous = _investment(
+        connection, external_id="inv-2", kind="MUTUAL_FUND", market_value=Decimal("100")
+    )
+    tagged = _investment(
         connection, external_id="inv-3", kind="ETF", market_value=Decimal("100")
     )
-    FinanceTag.objects.create(
+    tag = FinanceTag.objects.create(
         user=user,
         kind=FinanceTagKind.ASSET_CLASS,
         value=AssetClass.EQUITY_INTL,
-        investment=tagged_ambiguous,
+        investment=tagged,
     )
 
-    result = untagged_investments(user)
+    result = {row["id"]: row for row in reclassifiable_investments(user)}
 
-    assert result == [ambiguous]
+    assert result[fixed_income.id]["asset_class"] == AssetClass.FIXED_INCOME
+    assert result[fixed_income.id]["tag_id"] is None
+    assert result[ambiguous.id]["asset_class"] == AssetClass.EQUITY_BR
+    assert result[ambiguous.id]["tag_id"] is None
+    assert result[tagged.id]["asset_class"] == AssetClass.EQUITY_INTL
+    assert result[tagged.id]["tag_id"] == tag.id
 
 
 @pytest.mark.django_db
@@ -238,7 +336,34 @@ def test_taggable_cash_accounts_excludes_brokerage_and_credit(user, connection):
 
     result = taggable_cash_accounts(user)
 
-    assert result == [checking]
+    assert result == [
+        {"id": checking.id, "name": checking.name, "type": checking.type, "tag_id": None}
+    ]
+
+
+@pytest.mark.django_db
+def test_taggable_cash_accounts_reports_tag_id_when_marked_as_reserve(user, connection):
+    from apps.finance.models import Account
+
+    checking = Account.objects.create(
+        connection=connection,
+        external_id="acc-checking",
+        name="Conta corrente",
+        type=AccountType.CHECKING,
+        available_balance=Decimal("100"),
+    )
+    tag = FinanceTag.objects.create(
+        user=user,
+        kind=FinanceTagKind.ASSET_CLASS,
+        value=AssetClass.CASH_RESERVE,
+        account=checking,
+    )
+
+    result = taggable_cash_accounts(user)
+
+    assert result == [
+        {"id": checking.id, "name": checking.name, "type": checking.type, "tag_id": tag.id}
+    ]
 
 
 # --------------------------------------------------------------------------

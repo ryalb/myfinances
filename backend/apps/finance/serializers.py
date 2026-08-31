@@ -9,7 +9,9 @@ from .models import (
     BudgetBucketTarget,
     Card,
     CategorizationRule,
+    ChatMessage,
     Connection,
+    ExecutiveReport,
     FinanceTag,
     FinancialGoal,
     FinancialInstitution,
@@ -410,12 +412,31 @@ class FinanceTagSerializer(serializers.ModelSerializer):
             "updated_at",
         )
         read_only_fields = ("created_at", "updated_at")
+        # DRF gera um `UniqueTogetherValidator` por `UniqueConstraint` do model,
+        # inclusive as tres condicionais (`unique_tag_per_*_and_kind`) -- e
+        # `enforce_required_fields` desse validador forca como obrigatorios os
+        # `condition_fields` (account/investment/goal), contradizendo a propria
+        # regra do model de que exatamente um dos tres deve vir preenchido.
+        # Sem este `validators = []` toda criacao via API falhava com "este
+        # campo e obrigatorio" no primeiro dos dois campos nao usados. A
+        # checagem de duplicidade correta fica em `validate()` abaixo.
+        validators = []
 
     def validate(self, attrs):
-        targets = [attrs.get(field) for field in ("account", "investment", "goal")]
-        if sum(1 for target in targets if target is not None) != 1:
+        targets = {field: attrs.get(field) for field in ("account", "investment", "goal")}
+        filled = {field: value for field, value in targets.items() if value is not None}
+        if len(filled) != 1:
             raise serializers.ValidationError(
                 "Informe exatamente um de: account, investment, goal."
+            )
+
+        field_name, target = next(iter(filled.items()))
+        duplicates = FinanceTag.objects.filter(kind=attrs.get("kind"), **{field_name: target})
+        if self.instance is not None:
+            duplicates = duplicates.exclude(pk=self.instance.pk)
+        if duplicates.exists():
+            raise serializers.ValidationError(
+                {field_name: "Já existe uma tag deste tipo para este alvo."}
             )
         return attrs
 
@@ -429,6 +450,31 @@ class PortfolioBuilderReportSerializer(serializers.ModelSerializer):
             "guidance",
             "rebalancing_actions",
             "common_mistakes",
+            "disclaimer",
+            "sources",
+            "created_at",
+        )
+        read_only_fields = fields
+
+
+class ChatMessageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ChatMessage
+        fields = ("id", "role", "content", "sources", "created_at")
+        read_only_fields = fields
+
+
+class ExecutiveReportSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ExecutiveReport
+        fields = (
+            "id",
+            "contribution_amount",
+            "contribution_plan",
+            "summary",
+            "goal_fit",
+            "performance_verdict",
+            "contribution_rationale",
             "disclaimer",
             "sources",
             "created_at",

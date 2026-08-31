@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import Button from 'primevue/button'
 import Chart from 'primevue/chart'
+import Select from 'primevue/select'
+import AllocationTargetEditor from '@/components/portfolio/AllocationTargetEditor.vue'
 import { formatIsoDateTime } from '@/composables/useDateFormat'
 import { extractApiError } from '@/composables/useApi'
 import { useUiStore } from '@/stores/ui'
@@ -15,7 +17,7 @@ const blur = computed(() => (uiStore.isFinancialValueBlurred ? 'blur-sm select-n
 
 const { targets, saveTargets } = usePortfolioTargets()
 const { allocation, refresh: refreshAllocation } = useAssetAllocation()
-const { createTag } = useFinanceTags('asset_class')
+const { createTag, updateTag, deleteTag } = useFinanceTags('asset_class')
 const { report, loading, error, generate, remove } = usePortfolioBuilderReport()
 
 const editorItems = Object.entries(ASSET_CLASS_LABELS).map(([key, label]) => ({ key, label }))
@@ -67,14 +69,30 @@ const chartOptions = {
   scales: { x: { ticks: { callback: (value: number) => `${value}%` } } },
 }
 
-const pendingInvestmentClass = ref<Record<number, string>>({})
+const pendingInvestmentClass = ref<Record<number, string | undefined>>({})
 const taggingInvestmentId = ref<number | null>(null)
-const onTagInvestment = async (investmentId: number) => {
-  const value = pendingInvestmentClass.value[investmentId]
-  if (!value) return
-  taggingInvestmentId.value = investmentId
+const onReclassifyInvestment = async (investment: ReclassifiableInvestment) => {
+  const value = pendingInvestmentClass.value[investment.id]
+  if (!value || value === investment.assetClass) return
+  taggingInvestmentId.value = investment.id
   try {
-    await createTag({ investment: investmentId, value })
+    if (investment.tagId) {
+      await updateTag(investment.tagId, value)
+    } else {
+      await createTag({ investment: investment.id, value })
+    }
+    pendingInvestmentClass.value[investment.id] = undefined
+    await refreshAllocation()
+  } finally {
+    taggingInvestmentId.value = null
+  }
+}
+const onClearInvestmentTag = async (investment: ReclassifiableInvestment) => {
+  if (!investment.tagId) return
+  taggingInvestmentId.value = investment.id
+  try {
+    await deleteTag(investment.tagId)
+    pendingInvestmentClass.value[investment.id] = undefined
     await refreshAllocation()
   } finally {
     taggingInvestmentId.value = null
@@ -82,10 +100,14 @@ const onTagInvestment = async (investmentId: number) => {
 }
 
 const taggingAccountId = ref<number | null>(null)
-const onTagAccount = async (accountId: number) => {
-  taggingAccountId.value = accountId
+const onToggleAccountReserve = async (account: TaggableAccount) => {
+  taggingAccountId.value = account.id
   try {
-    await createTag({ account: accountId, value: 'cash_reserve' })
+    if (account.tagId) {
+      await deleteTag(account.tagId)
+    } else {
+      await createTag({ account: account.id, value: 'cash_reserve' })
+    }
     await refreshAllocation()
   } finally {
     taggingAccountId.value = null
@@ -166,31 +188,46 @@ const isEmpty = computed(
     </div>
 
     <div
-      v-if="allocation?.untaggedInvestments?.length || allocation?.taggableCashAccounts?.length"
+      v-if="allocation?.reclassifiableInvestments?.length || allocation?.taggableCashAccounts?.length"
       class="grid gap-4 lg:grid-cols-2"
     >
-      <div v-if="allocation?.untaggedInvestments?.length" class="rounded-lg border border-sepia-200 bg-white p-5 shadow-sm">
-        <h3 class="mb-1 text-base font-semibold text-sepia-900">Investimentos sem classe definida</h3>
+      <div v-if="allocation?.reclassifiableInvestments?.length" class="rounded-lg border border-sepia-200 bg-white p-5 shadow-sm">
+        <h3 class="mb-1 text-base font-semibold text-sepia-900">Classifique seus investimentos</h3>
         <p class="mb-3 text-xs text-sepia-400">
-          O tipo destes ativos é ambíguo (fundo, ETF ou COE) -- diga a classe real de cada um.
+          Cada investimento já recebe uma classe automática pelo tipo que o banco informa -- troque
+          se não representar a realidade (ex: uma aplicação que você trata como reserva de
+          emergência).
         </p>
         <ul class="space-y-3">
-          <li v-for="investment in allocation.untaggedInvestments" :key="investment.id" class="flex items-center gap-2">
+          <li v-for="investment in allocation.reclassifiableInvestments" :key="investment.id" class="flex items-center gap-2">
             <span class="flex-1 truncate text-sm text-sepia-700">{{ investment.name }}</span>
-            <select
-              v-model="pendingInvestmentClass[investment.id]"
-              class="rounded-lg border border-sepia-300 px-2 py-1 text-xs focus:border-sepia-500 focus:outline-none"
-            >
-              <option value="" disabled>Classificar como...</option>
-              <option v-for="(label, key) in ASSET_CLASS_LABELS" :key="key" :value="key">{{ label }}</option>
-            </select>
+            <Select
+              :model-value="pendingInvestmentClass[investment.id] ?? investment.assetClass"
+              :options="editorItems"
+              option-label="label"
+              option-value="key"
+              filter
+              filter-placeholder="Buscar classe..."
+              class="w-48 text-xs"
+              @update:model-value="pendingInvestmentClass[investment.id] = $event"
+            />
             <button
+              v-if="(pendingInvestmentClass[investment.id] ?? investment.assetClass) !== investment.assetClass"
               type="button"
-              :disabled="!pendingInvestmentClass[investment.id] || taggingInvestmentId === investment.id"
+              :disabled="taggingInvestmentId === investment.id"
               class="shrink-0 rounded-lg bg-sepia-100 px-3 py-1 text-xs font-medium text-sepia-700 hover:bg-sepia-200 disabled:opacity-40"
-              @click="onTagInvestment(investment.id)"
+              @click="onReclassifyInvestment(investment)"
             >
-              {{ taggingInvestmentId === investment.id ? '...' : 'Marcar' }}
+              {{ taggingInvestmentId === investment.id ? '...' : 'Salvar' }}
+            </button>
+            <button
+              v-else-if="investment.tagId"
+              type="button"
+              :disabled="taggingInvestmentId === investment.id"
+              class="shrink-0 text-xs text-sepia-500 hover:underline disabled:opacity-40"
+              @click="onClearInvestmentTag(investment)"
+            >
+              {{ taggingInvestmentId === investment.id ? '...' : 'Usar automático' }}
             </button>
           </li>
         </ul>
@@ -208,10 +245,15 @@ const isEmpty = computed(
             <button
               type="button"
               :disabled="taggingAccountId === acc.id"
-              class="shrink-0 rounded-lg bg-sepia-100 px-3 py-1 text-xs font-medium text-sepia-700 hover:bg-sepia-200 disabled:opacity-40"
-              @click="onTagAccount(acc.id)"
+              :class="[
+                'shrink-0 rounded-lg px-3 py-1 text-xs font-medium disabled:opacity-40',
+                acc.tagId
+                  ? 'border border-sepia-300 bg-white text-sepia-600 hover:bg-sepia-50'
+                  : 'bg-sepia-100 text-sepia-700 hover:bg-sepia-200',
+              ]"
+              @click="onToggleAccountReserve(acc)"
             >
-              {{ taggingAccountId === acc.id ? '...' : 'Marcar como reserva' }}
+              {{ taggingAccountId === acc.id ? '...' : (acc.tagId ? 'Desmarcar' : 'Marcar como reserva') }}
             </button>
           </li>
         </ul>

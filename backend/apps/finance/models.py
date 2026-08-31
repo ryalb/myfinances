@@ -732,6 +732,73 @@ class PortfolioBuilderReport(TimeStampedModel):
         return f"{self.user_id}:{self.created_at:%Y-%m-%d %H:%M}"
 
 
+class ExecutiveReport(TimeStampedModel):
+    """Relatorio de IA gerado por `LLMService.generate_executive_report`.
+
+    Sintese das tres perguntas que motivaram este relatorio: a alocacao atual
+    faz sentido para as metas? o rendimento esta bom ou vale mudar de
+    aplicacao? quanto aportar em cada classe no proximo aporte? Quarta
+    ocorrencia do padrao "uma analise por usuario, reanalisar substitui"
+    (`PortfolioReport`, `FutureProjectionReport`, `PortfolioBuilderReport`).
+    `contribution_plan` vem de `allocation.build_contribution_plan` (calculo
+    determinístico); nao ha campo proprio para o desvio de alocacao ou a
+    viabilidade de metas -- esses numeros ja tem dono em
+    `PortfolioBuilderReport.drift`/`FutureProjectionReport.projection` e so
+    passam pelo prompt aqui, para nunca existir uma segunda fonte de verdade
+    para o mesmo numero.
+    """
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="executive_report"
+    )
+    contribution_amount = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    contribution_plan = models.JSONField(default=list, blank=True)
+    summary = models.TextField(blank=True)
+    goal_fit = models.JSONField(default=list, blank=True)
+    performance_verdict = models.JSONField(default=list, blank=True)
+    contribution_rationale = models.JSONField(default=list, blank=True)
+    disclaimer = models.TextField(blank=True)
+    sources = models.JSONField(default=list, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"{self.user_id}:{self.created_at:%Y-%m-%d %H:%M}"
+
+
+class ChatMessageRole(models.TextChoices):
+    USER = "user", "User"
+    ASSISTANT = "assistant", "Assistant"
+
+
+class ChatMessage(TimeStampedModel):
+    """Turno de uma conversa continua de IA sobre os dados financeiros do usuario.
+
+    Ao contrario dos quatro relatorios de IA (`PortfolioReport` e afins, um por
+    usuario, "Reanalisar" substitui), aqui cada mensagem acumula -- e uma
+    conversa, nao uma analise para regenerar. `sources` guarda o mesmo
+    snapshot de rastreabilidade das outras respostas de IA, sempre vazio nas
+    mensagens do usuario.
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="chat_messages"
+    )
+    role = models.CharField(max_length=10, choices=ChatMessageRole.choices)
+    content = models.TextField()
+    sources = models.JSONField(default=list, blank=True)
+
+    class Meta:
+        ordering = ["created_at"]
+        indexes = [
+            models.Index(fields=["user", "created_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.user_id}:{self.role}:{self.created_at:%Y-%m-%d %H:%M}"
+
+
 class ProcessedWebhookEvent(TimeStampedModel):
     """Registro de eventId ja processado.
 

@@ -7,9 +7,9 @@ from graphene_django import DjangoObjectType
 from .alerts import build_user_alerts
 from .allocation import (
     build_allocation_drift,
+    reclassifiable_investments,
     serialize_allocation_drift,
     taggable_cash_accounts,
-    untagged_investments,
 )
 from .budget_buckets import build_bucket_drift, serialize_bucket_drift
 from .consolidation import (
@@ -247,16 +247,19 @@ class BucketDriftRowType(graphene.ObjectType):
     drift_pp = graphene.Float()
 
 
-class UntaggedInvestmentType(graphene.ObjectType):
+class ReclassifiableInvestmentType(graphene.ObjectType):
     id = graphene.Int()
     name = graphene.String()
     kind = graphene.String()
+    asset_class = graphene.String()
+    tag_id = graphene.Int()
 
 
 class TaggableAccountType(graphene.ObjectType):
     id = graphene.Int()
     name = graphene.String()
     type = graphene.String()
+    tag_id = graphene.Int()
 
 
 class ScenarioValueType(graphene.ObjectType):
@@ -341,7 +344,7 @@ class Query(graphene.ObjectType):
     future_projection = graphene.Field(FutureProjectionType)
     financial_health_score = graphene.Field(FinancialHealthScoreType)
     portfolio_allocation_drift = graphene.List(AllocationDriftRowType)
-    untagged_investments = graphene.List(UntaggedInvestmentType)
+    reclassifiable_investments = graphene.List(ReclassifiableInvestmentType)
     taggable_cash_accounts = graphene.List(TaggableAccountType)
     budget_bucket_drift = graphene.List(
         BucketDriftRowType, year=graphene.Int(), month=graphene.Int()
@@ -685,23 +688,17 @@ class Query(graphene.ObjectType):
         rows = serialize_allocation_drift(build_allocation_drift(user))
         return [AllocationDriftRowType(**row) for row in rows]
 
-    def resolve_untagged_investments(self, info):
+    def resolve_reclassifiable_investments(self, info):
         user = info.context.user
         if not user or not user.is_authenticated:
             return []
-        return [
-            UntaggedInvestmentType(id=investment.id, name=investment.name, kind=investment.kind)
-            for investment in untagged_investments(user)
-        ]
+        return [ReclassifiableInvestmentType(**row) for row in reclassifiable_investments(user)]
 
     def resolve_taggable_cash_accounts(self, info):
         user = info.context.user
         if not user or not user.is_authenticated:
             return []
-        return [
-            TaggableAccountType(id=account.id, name=account.name, type=account.type)
-            for account in taggable_cash_accounts(user)
-        ]
+        return [TaggableAccountType(**row) for row in taggable_cash_accounts(user)]
 
     def resolve_budget_bucket_drift(self, info, year=None, month=None):
         user = info.context.user

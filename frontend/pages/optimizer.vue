@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import Chart from 'primevue/chart'
+import AllocationTargetEditor from '@/components/portfolio/AllocationTargetEditor.vue'
 import { extractApiError } from '@/composables/useApi'
 import { useUiStore } from '@/stores/ui'
 import { BUDGET_BUCKET_LABELS, TAGGABLE_BUCKETS } from '@/composables/useBudgetBucketTargets'

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import Button from 'primevue/button'
 import Checkbox from 'primevue/checkbox'
+import Column from 'primevue/column'
+import DataTable from 'primevue/datatable'
 import DatePicker from 'primevue/datepicker'
 import IconField from 'primevue/iconfield'
 import InputIcon from 'primevue/inputicon'
@@ -187,12 +189,13 @@ const {
   loading,
   next,
   previous,
+  refresh: refreshTransactions,
 } = usePaginatedList<TransactionRow>('transactions-page', '/transactions/', {
   pageSize: 50,
   params: activeParams,
 })
 
-const { get, download, patch, del } = useApi()
+const { get, post, download, patch, del } = useApi()
 
 // Estatísticas e totais por categoria dos MESMOS filtros da listagem -- os
 // cards e gráficos precisam bater com o que está na tabela, não com o
@@ -235,66 +238,36 @@ const TYPE_OPTIONS = [
   { label: 'Despesa', value: 'debit' },
 ]
 
-// Edição manual da categoria: um lançamento por vez (`editingCategoryId`), com
-// autocomplete pelas categorias já existentes. Depois de salvar/restaurar,
-// estatísticas e a lista de categorias do filtro são recarregadas -- editar
-// pode introduzir uma categoria nova ou mudar os totais por categoria.
-const editingCategoryId = ref<number | null>(null)
-const editingCategoryValue = ref('')
-// Ref de função, não `ref="..."` direto: o input mora dentro de um `v-for`, e
-// uma string-ref ali é coletada num array pelo Vue mesmo com o `v-if` só
-// deixando um existir por vez -- `.focus()` quebraria num array. O `InputText`
-// do PrimeVue também devolve a instância do componente, não o `<input>` cru --
-// `.$el` é o elemento de fato.
-const categoryInputEl = ref<HTMLInputElement | null>(null)
-const setCategoryInputEl = (el: unknown) => {
-  const target = el && typeof el === 'object' && '$el' in el ? (el as { $el: unknown }).$el : el
-  categoryInputEl.value = target as HTMLInputElement | null
-}
-const savingCategory = ref(false)
-const categoryError = ref('')
+// A categoria fica sempre editável na tabela (sem clique pra entrar em modo de
+// edição): `Select` com `filter` mostra as categorias já existentes com busca
+// embutida, e selecionar uma opção salva na hora -- sem clique extra num botão
+// "Salvar". Depois de salvar/restaurar, estatísticas e a lista de categorias
+// do filtro são recarregadas -- editar pode mudar os totais por categoria.
+const savingCategoryIds = ref<Set<number>>(new Set())
+const categoryErrors = ref<Map<number, string>>(new Map())
 
-const startEditingCategory = async (tx: TransactionRow) => {
-  editingCategoryId.value = tx.id
-  editingCategoryValue.value = tx.category
-  categoryError.value = ''
-  await nextTick()
-  categoryInputEl.value?.focus()
-  categoryInputEl.value?.select()
-}
-
-const cancelEditingCategory = () => {
-  editingCategoryId.value = null
-  categoryError.value = ''
-}
-
-const saveCategory = async (tx: TransactionRow) => {
-  const value = editingCategoryValue.value.trim()
-  if (!value) {
-    categoryError.value = 'Informe uma categoria.'
-    return
-  }
-  savingCategory.value = true
-  categoryError.value = ''
+const saveCategory = async (tx: TransactionRow, value: string) => {
+  if (!value || value === tx.category) return
+  savingCategoryIds.value.add(tx.id)
+  categoryErrors.value.delete(tx.id)
   try {
     const updated = await patch<TransactionRow>(`/transactions/${tx.id}/category/`, { category: value })
     if (updated) {
       tx.category = updated.category
       tx.category_is_manual = updated.category_is_manual
     }
-    editingCategoryId.value = null
     await Promise.all([refreshCategories(), refreshStats()])
   } catch (e: unknown) {
-    categoryError.value = extractApiError(e, 'Erro ao salvar a categoria.')
+    categoryErrors.value.set(tx.id, extractApiError(e, 'Erro ao salvar a categoria.'))
   } finally {
-    savingCategory.value = false
+    savingCategoryIds.value.delete(tx.id)
   }
 }
 
 // Apaga a escolha manual e volta para a categoria automática (regras + Pluggy).
 const resetCategory = async (tx: TransactionRow) => {
-  savingCategory.value = true
-  categoryError.value = ''
+  savingCategoryIds.value.add(tx.id)
+  categoryErrors.value.delete(tx.id)
   try {
     const updated = await del<TransactionRow>(`/transactions/${tx.id}/category/`)
     if (updated) {
@@ -303,9 +276,9 @@ const resetCategory = async (tx: TransactionRow) => {
     }
     await Promise.all([refreshCategories(), refreshStats()])
   } catch (e: unknown) {
-    categoryError.value = extractApiError(e, 'Erro ao restaurar a categoria automática.')
+    categoryErrors.value.set(tx.id, extractApiError(e, 'Erro ao restaurar a categoria automática.'))
   } finally {
-    savingCategory.value = false
+    savingCategoryIds.value.delete(tx.id)
   }
 }
 
@@ -422,6 +395,61 @@ const typeBadge = (tx: TransactionRow) => {
   return tx.type === 'credit' ? 'bg-azul-100 text-azul-700' : 'bg-vermelho-100 text-vermelho-700'
 }
 
+// Sincroniza todas as conexões de uma vez em vez de mandar o usuário pra tela
+// de integrações e clicar conexão por conexão. Cada POST só enfileira o job no
+// Celery; o fim de fato chega pelo WebSocket (`sync_event`, já conectado
+// globalmente em `layouts/default.vue`) -- por isso o timeout de segurança,
+// igual ao de `ConnectionItem.vue`: sem ele, um evento perdido travaria o
+// botão girando pra sempre.
+type ConnectionSummary = { id: number, status: string }
+const syncingAll = ref(false)
+const syncAllError = ref('')
+const pendingSyncConnectionIds = ref<Set<number>>(new Set())
+const lastSyncEvent = useSyncEvent()
+let syncAllTimeout: ReturnType<typeof setTimeout> | null = null
+
+const finishSyncAll = async () => {
+  if (syncAllTimeout) {
+    clearTimeout(syncAllTimeout)
+    syncAllTimeout = null
+  }
+  syncingAll.value = false
+  pendingSyncConnectionIds.value = new Set()
+  await Promise.all([refreshTransactions(), refreshStats(), refreshCategories()])
+}
+
+watch(lastSyncEvent, (event) => {
+  if (!event || !pendingSyncConnectionIds.value.has(event.connectionId)) return
+  if (event.status !== 'SUCCESS' && event.status !== 'FAILED') return
+  pendingSyncConnectionIds.value.delete(event.connectionId)
+  if (pendingSyncConnectionIds.value.size === 0) finishSyncAll()
+})
+
+const syncAllConnections = async () => {
+  syncingAll.value = true
+  syncAllError.value = ''
+  try {
+    const connections = (await get<ConnectionSummary[]>('/connections/')) ?? []
+    const active = connections.filter((conn) => conn.status !== 'expired')
+    if (!active.length) {
+      syncingAll.value = false
+      return
+    }
+    pendingSyncConnectionIds.value = new Set(active.map((conn) => conn.id))
+    await Promise.all(
+      active.map((conn) => post(`/connections/${conn.id}/sync/`, { kind: 'incremental' })),
+    )
+    syncAllTimeout = setTimeout(finishSyncAll, 60_000)
+  } catch (e: unknown) {
+    syncingAll.value = false
+    syncAllError.value = extractApiError(e, 'Erro ao sincronizar as contas.')
+  }
+}
+
+onUnmounted(() => {
+  if (syncAllTimeout) clearTimeout(syncAllTimeout)
+})
+
 // Pagamento de fatura de cartao e transferencia entre contas proprias nao sao
 // receita nem despesa, so dinheiro mudando de bolso -- rotulo neutro em vez do
 // "Receita" que o `type` cru (CREDIT no lado do cartao) sugeriria.
@@ -450,6 +478,14 @@ const isFutureTx = (bookedAt: string) => {
           {{ count }} {{ count === 1 ? 'lançamento' : 'lançamentos' }}
           <span v-if="hasActiveFilter" class="text-sepia-400">(filtrado)</span>
         </span>
+        <Button
+          :disabled="syncingAll"
+          class="!inline-flex !shrink-0 !items-center !gap-2 !whitespace-nowrap !rounded-lg !border !border-sepia-300 !bg-white !px-3 !py-1.5 !text-xs !font-medium !text-sepia-700 hover:!bg-sepia-50 disabled:!opacity-40"
+          @click="syncAllConnections"
+        >
+          <Icon :icon="syncingAll ? 'mdi:loading' : 'mdi:refresh'" :class="['h-4 w-4', syncingAll ? 'animate-spin' : '']" />
+          {{ syncingAll ? 'Atualizando...' : 'Atualizar contas' }}
+        </Button>
         <div ref="columnsMenuRef" class="relative">
           <Button
             class="!inline-flex !shrink-0 !items-center !gap-2 !whitespace-nowrap !rounded-lg !border !border-sepia-300 !bg-white !px-3 !py-1.5 !text-xs !font-medium !text-sepia-700 hover:!bg-sepia-50"
@@ -484,6 +520,10 @@ const isFutureTx = (bookedAt: string) => {
 
     <p v-if="exportError" class="rounded-lg border border-vermelho-200 bg-vermelho-50 px-4 py-3 text-sm text-vermelho-700">
       {{ exportError }}
+    </p>
+
+    <p v-if="syncAllError" class="rounded-lg border border-vermelho-200 bg-vermelho-50 px-4 py-3 text-sm text-vermelho-700">
+      {{ syncAllError }}
     </p>
 
     <!-- Filtros -->
@@ -584,105 +624,73 @@ const isFutureTx = (bookedAt: string) => {
     </div>
 
     <div v-else class="overflow-hidden rounded-lg border border-sepia-200 bg-white shadow-sm">
-      <table class="w-full text-sm">
-        <thead class="border-b border-sepia-200 bg-sepia-50">
-          <tr>
-            <th v-if="isColumnVisible('date')" class="px-4 py-3 text-left font-medium text-sepia-600">Data</th>
-            <th v-if="isColumnVisible('description')" class="px-4 py-3 text-left font-medium text-sepia-600">Descrição</th>
-            <th v-if="isColumnVisible('account')" class="px-4 py-3 text-left font-medium text-sepia-600">Conta</th>
-            <th v-if="isColumnVisible('institution')" class="px-4 py-3 text-left font-medium text-sepia-600">Banco</th>
-            <th v-if="isColumnVisible('category')" class="px-4 py-3 text-left font-medium text-sepia-600">Categoria</th>
-            <th v-if="isColumnVisible('type')" class="px-4 py-3 text-left font-medium text-sepia-600">Tipo</th>
-            <th v-if="isColumnVisible('amount')" class="px-4 py-3 text-right font-medium text-sepia-600">Valor</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr
-            v-for="tx in transactions" :key="tx.id"
-            :class="['border-b border-sepia-100 last:border-0', (isFutureTx(tx.booked_at) || tx.is_internal_transfer) ? 'opacity-60' : '']"
-          >
-            <td v-if="isColumnVisible('date')" class="whitespace-nowrap px-4 py-3 text-sepia-500">
-              {{ formatIsoDateOnly(tx.booked_at) }}
-              <span v-if="isFutureTx(tx.booked_at)" class="ml-1.5 inline-block whitespace-nowrap rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
-                Previsto
-              </span>
-            </td>
-            <td v-if="isColumnVisible('description')" class="px-4 py-3 font-medium text-sepia-900">{{ tx.description }}</td>
-            <td v-if="isColumnVisible('account')" class="px-4 py-3 text-sepia-600">{{ tx.account_name || '—' }}</td>
-            <td v-if="isColumnVisible('institution')" class="px-4 py-3 text-sepia-600">{{ tx.institution_name || '—' }}</td>
-            <td v-if="isColumnVisible('category')" class="px-4 py-3">
-              <div v-if="editingCategoryId === tx.id" class="flex flex-col gap-1">
-                <div class="flex items-center gap-1">
-                  <InputText
-                    :ref="setCategoryInputEl"
-                    v-model="editingCategoryValue"
-                    type="text"
-                    list="category-suggestions"
-                    :disabled="savingCategory"
-                    class="w-32 !px-1.5 !py-0.5 !text-xs"
-                    @keydown.enter="saveCategory(tx)"
-                    @keydown.escape="cancelEditingCategory"
-                  />
-                  <Button
-                    text
-                    rounded
-                    size="small"
-                    :disabled="savingCategory"
-                    class="shrink-0 !text-azul-600 hover:!text-azul-700 disabled:!opacity-40"
-                    title="Salvar"
-                    @click="saveCategory(tx)"
-                  >
-                    <Icon icon="mdi:check" class="h-4 w-4" />
-                  </Button>
-                  <Button
-                    text
-                    rounded
-                    size="small"
-                    :disabled="savingCategory"
-                    class="shrink-0 !text-sepia-400 hover:!text-sepia-600 disabled:!opacity-40"
-                    title="Cancelar"
-                    @click="cancelEditingCategory"
-                  >
-                    <Icon icon="mdi:close" class="h-4 w-4" />
-                  </Button>
-                </div>
-                <p v-if="categoryError" class="text-[10px] leading-tight text-vermelho-600">{{ categoryError }}</p>
-              </div>
-              <div v-else class="group flex items-center gap-1">
-                <Button
-                  text
-                  size="small"
-                  class="!inline-flex !items-center !gap-1 !whitespace-nowrap !rounded !bg-sepia-100 !px-2 !py-0.5 !text-xs !text-sepia-600 hover:!bg-sepia-200"
-                  title="Clique para editar a categoria"
-                  @click="startEditingCategory(tx)"
-                >
-                  {{ tx.category || 'Sem categoria' }}
-                  <Icon v-if="tx.category_is_manual" icon="mdi:pencil" class="h-3 w-3 text-sepia-400" />
-                </Button>
-                <Button
-                  v-if="tx.category_is_manual"
-                  text
-                  rounded
-                  size="small"
-                  class="shrink-0 !text-sepia-300 opacity-0 hover:!text-sepia-500 group-hover:opacity-100"
-                  title="Restaurar categoria automática"
-                  @click="resetCategory(tx)"
-                >
-                  <Icon icon="mdi:restore" class="h-3.5 w-3.5" />
-                </Button>
-              </div>
-            </td>
-            <td v-if="isColumnVisible('type')" class="px-4 py-3">
-              <span :class="['inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium', typeBadge(tx)]">
-                {{ typeLabel(tx) }}
-              </span>
-            </td>
-            <td v-if="isColumnVisible('amount')" :class="['whitespace-nowrap px-4 py-3 text-right font-mono font-medium', tx.is_internal_transfer ? 'text-sepia-500' : (tx.type === 'credit' ? 'text-azul-600' : 'text-vermelho-600'), blur]">
-              {{ tx.is_internal_transfer ? '' : (tx.type === 'credit' ? '+' : '-') }}{{ formatBRL(Math.abs(Number(tx.amount))) }}
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      <DataTable
+        :value="transactions"
+        data-key="id"
+        class="text-sm"
+        table-style="width: 100%"
+        :row-class="(tx) => ['border-b border-sepia-100 last:border-0', (isFutureTx(tx.booked_at) || tx.is_internal_transfer) ? 'opacity-60' : '']"
+        :pt="{ headerRow: { class: 'border-b border-sepia-200 bg-sepia-50' } }"
+      >
+        <Column v-if="isColumnVisible('date')" header="Data" header-class="px-4 py-3 text-left font-medium text-sepia-600" body-class="whitespace-nowrap px-4 py-3 text-sepia-500">
+          <template #body="{ data }">
+            {{ formatIsoDateOnly(data.booked_at) }}
+            <span v-if="isFutureTx(data.booked_at)" class="ml-1.5 inline-block whitespace-nowrap rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
+              Previsto
+            </span>
+          </template>
+        </Column>
+        <Column v-if="isColumnVisible('description')" field="description" header="Descrição" header-class="px-4 py-3 text-left font-medium text-sepia-600" body-class="px-4 py-3 font-medium text-sepia-900" />
+        <Column v-if="isColumnVisible('account')" header="Conta" header-class="px-4 py-3 text-left font-medium text-sepia-600" body-class="px-4 py-3 text-sepia-600">
+          <template #body="{ data }">{{ data.account_name || '—' }}</template>
+        </Column>
+        <Column v-if="isColumnVisible('institution')" header="Banco" header-class="px-4 py-3 text-left font-medium text-sepia-600" body-class="px-4 py-3 text-sepia-600">
+          <template #body="{ data }">{{ data.institution_name || '—' }}</template>
+        </Column>
+        <Column v-if="isColumnVisible('category')" header="Categoria" header-style="width: 14rem" header-class="px-4 py-3 text-left font-medium text-sepia-600" body-class="px-4 py-3">
+          <template #body="{ data }">
+            <div class="group flex items-center gap-1">
+              <Select
+                :model-value="data.category"
+                :options="categories"
+                filter
+                filter-placeholder="Buscar categoria..."
+                :disabled="savingCategoryIds.has(data.id)"
+                class="w-full"
+                @update:model-value="saveCategory(data, $event)"
+              />
+              <Icon v-if="data.category_is_manual" icon="mdi:pencil" class="h-3 w-3 shrink-0 text-sepia-400" title="Categoria definida manualmente" />
+              <Button
+                v-if="data.category_is_manual"
+                text
+                rounded
+                size="small"
+                :disabled="savingCategoryIds.has(data.id)"
+                class="shrink-0 !text-sepia-300 opacity-0 hover:!text-sepia-500 group-hover:opacity-100"
+                title="Restaurar categoria automática"
+                @click="resetCategory(data)"
+              >
+                <Icon icon="mdi:restore" class="h-3.5 w-3.5" />
+              </Button>
+            </div>
+            <p v-if="categoryErrors.get(data.id)" class="mt-1 text-[10px] leading-tight text-vermelho-600">{{ categoryErrors.get(data.id) }}</p>
+          </template>
+        </Column>
+        <Column v-if="isColumnVisible('type')" header="Tipo" header-class="px-4 py-3 text-left font-medium text-sepia-600" body-class="px-4 py-3">
+          <template #body="{ data }">
+            <span :class="['inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium', typeBadge(data)]">
+              {{ typeLabel(data) }}
+            </span>
+          </template>
+        </Column>
+        <Column v-if="isColumnVisible('amount')" header="Valor" header-class="px-4 py-3 text-right font-medium text-sepia-600" body-class="whitespace-nowrap px-4 py-3 text-right font-mono font-medium">
+          <template #body="{ data }">
+            <span :class="[data.is_internal_transfer ? 'text-sepia-500' : (data.type === 'credit' ? 'text-azul-600' : 'text-vermelho-600'), blur]">
+              {{ data.is_internal_transfer ? '' : (data.type === 'credit' ? '+' : '-') }}{{ formatBRL(Math.abs(Number(data.amount))) }}
+            </span>
+          </template>
+        </Column>
+      </DataTable>
 
       <div v-if="totalPages > 1" class="flex items-center justify-between border-t border-sepia-200 px-4 py-3">
         <Button
@@ -702,9 +710,5 @@ const isFutureTx = (bookedAt: string) => {
         </Button>
       </div>
     </div>
-
-    <datalist id="category-suggestions">
-      <option v-for="category in categories" :key="category" :value="category" />
-    </datalist>
   </section>
 </template>
