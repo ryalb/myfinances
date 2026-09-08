@@ -2,6 +2,7 @@ import logging
 import re
 from datetime import date as date_type
 from datetime import datetime, time, timedelta
+from decimal import Decimal
 
 from asgiref.sync import async_to_sync
 from celery import shared_task
@@ -17,6 +18,7 @@ from .domain import (
     normalize_transaction_category,
     refine_connection_institution,
 )
+from .investment_cost_basis import compute_average_cost_basis
 from .models import (
     Account,
     AccountType,
@@ -25,6 +27,7 @@ from .models import (
     Identity,
     Investment,
     InvestmentPosition,
+    InvestmentTransaction,
     PensionPlan,
     Subscription,
     SubscriptionPayment,
@@ -565,10 +568,54 @@ def _sync_pension_plans(client, connection) -> None:
         )
 
 
+def _sync_investment_transactions_and_estimate_cost(
+    client: PluggyClient, investment: Investment, investment_data: dict
+) -> Decimal | None:
+    """Custo medio estimado para o fallback de `amount_original` (ver
+    `investment_cost_basis.py`). So busca as transacoes na Pluggy quando falta
+    `amountOriginal` no payload da posicao -- uma chamada extra por investimento,
+    entao evitar quando o dado ja vem pronto (comum em Renda Fixa).
+    """
+    if investment_data.get("amountOriginal") is not None:
+        return None
+
+    try:
+        transactions_data = client.fetch_investment_transactions(investment_data["id"])
+    except Exception as exc:
+        logger.warning(
+            "Error fetching investment transactions for %s: %s",
+            investment_data["id"],
+            exc,
+        )
+        return None
+
+    for txn in transactions_data:
+        txn_id = txn.get("id")
+        txn_date = _parse_date_only(txn.get("date"))
+        if not txn_id or txn_date is None:
+            logger.warning(
+                "Investment transaction ignorada, campo obrigatorio ausente: %r", txn
+            )
+            continue
+        InvestmentTransaction.objects.update_or_create(
+            external_id=txn_id,
+            defaults={
+                "investment": investment,
+                "type": txn.get("type", ""),
+                "quantity": txn.get("quantity"),
+                "amount": txn.get("amount"),
+                "date": txn_date,
+            },
+        )
+
+    return compute_average_cost_basis(investment.transactions.order_by("date"))
+
+
 @shared_task
 def sync_connection_data(sync_job_id: int) -> None:
     sync_job = SyncJob.objects.select_related("connection").get(pk=sync_job_id)
     connection = sync_job.connection
+
 
     sync_job.status = SyncJobStatus.RUNNING
     sync_job.started_at = timezone.now()
@@ -784,6 +831,9 @@ def sync_connection_data(sync_job_id: int) -> None:
                         ),
                     },
                 )
+                estimated_amount_original = _sync_investment_transactions_and_estimate_cost(
+                    client, investment, investment_data
+                )
                 InvestmentPosition.objects.update_or_create(
                     investment=investment,
                     as_of_date=today,
@@ -803,6 +853,7 @@ def sync_connection_data(sync_job_id: int) -> None:
                         "amount_profit": investment_data.get("amountProfit"),
                         "amount_withdrawal": investment_data.get("amountWithdrawal"),
                         "amount_original": investment_data.get("amountOriginal"),
+                        "estimated_amount_original": estimated_amount_original,
                         "price_factor": investment_data.get("priceFactor"),
                         "status": investment_data.get("status") or "",
                         "purchase_date": _parse_date_only(investment_data.get("purchaseDate")),
@@ -905,6 +956,39 @@ def reconcile_all_subscriptions() -> int:
             logger.exception("Reconciliacao de assinaturas falhou para o usuario %s", user.pk)
     logger.info("Assinaturas reconciliadas para %s de %s usuarios", reconciled, users.count())
     return reconciled
+
+
+@shared_task
+def sync_market_data() -> dict:
+    """Atualiza Selic, CDI e IPCA a partir do Bacen SGS.
+
+    Dado publico, sem relacao com usuario: uma falha aqui nao deve interromper
+    snapshot ou reconciliacao, entao roda como task propria em vez de dentro de
+    `snapshot_all_users`.
+    """
+    from .market_data import MarketDataUnavailable, sync_market_index_rates
+
+    try:
+        return sync_market_index_rates()
+    except MarketDataUnavailable:
+        logger.exception("Sincronizacao de indices de mercado falhou")
+        return {}
+
+
+@shared_task
+def sync_market_quotes() -> int:
+    """Atualiza a cotacao dos tickers que algum usuario possui, via brapi.dev.
+
+    Task propria, separada de `sync_market_data`: fonte e formato diferentes
+    (por ticker, nao por indice), uma falha nao deve derrubar a outra.
+    """
+    from .market_data import MarketDataUnavailable, sync_market_quotes_for_held_tickers
+
+    try:
+        return sync_market_quotes_for_held_tickers()
+    except MarketDataUnavailable:
+        logger.exception("Sincronizacao de cotacoes de mercado falhou")
+        return 0
 
 
 def _queue_full_sync(connection, reason: str) -> None:

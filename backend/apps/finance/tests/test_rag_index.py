@@ -34,6 +34,9 @@ from apps.finance.models import (
     FinancialGoal,
     Investment,
     InvestmentPosition,
+    MarketIndexKind,
+    MarketIndexRate,
+    MarketQuote,
     Subscription,
     SubscriptionCategory,
     Transaction,
@@ -87,6 +90,92 @@ def test_domains_without_data_are_omitted(user, connection, account):
     assert "accounts" in types
     assert "cards" not in types
     assert "goals" not in types
+
+
+@pytest.mark.django_db
+def test_market_rates_document_is_omitted_when_no_rate_synced(user):
+    types = {doc.source_type for doc in build_user_documents(user)}
+
+    assert "market_rates" not in types
+
+
+@pytest.mark.django_db
+def test_market_rates_document_shows_the_latest_point_per_index(user):
+    MarketIndexRate.objects.create(
+        kind=MarketIndexKind.SELIC, reference_date=date(2026, 7, 1), value=Decimal("0.036523")
+    )
+    MarketIndexRate.objects.create(
+        kind=MarketIndexKind.SELIC, reference_date=date(2026, 7, 2), value=Decimal("0.036789")
+    )
+    MarketIndexRate.objects.create(
+        kind=MarketIndexKind.IPCA, reference_date=date(2026, 6, 1), value=Decimal("0.50")
+    )
+
+    documents = [doc for doc in build_user_documents(user) if doc.source_type == "market_rates"]
+
+    assert len(documents) == 1
+    content = documents[0].content
+    assert "Selic" in content and "0.036789" in content and "2026-07-02" in content
+    assert "0.036523" not in content, "so o ponto mais recente de cada indice deve aparecer"
+    assert "IPCA" in content and "0.50" in content
+
+
+@pytest.mark.django_db
+def test_market_quotes_document_is_omitted_without_held_tickers(user):
+    types = {doc.source_type for doc in build_user_documents(user)}
+
+    assert "market_quotes" not in types
+
+
+@pytest.mark.django_db
+def test_market_quotes_document_is_omitted_when_ticker_has_no_quote_yet(user, connection):
+    Investment.objects.create(
+        connection=connection, external_id="i1", name="PMLL11", kind="EQUITY", code="PMLL11"
+    )
+
+    types = {doc.source_type for doc in build_user_documents(user)}
+
+    assert "market_quotes" not in types
+
+
+@pytest.mark.django_db
+def test_market_quotes_document_shows_only_the_users_own_tickers(user, connection):
+    Investment.objects.create(
+        connection=connection, external_id="i1", name="PMLL11", kind="EQUITY", code="PMLL11"
+    )
+    MarketQuote.objects.create(
+        ticker="PMLL11", as_of_date=date(2026, 8, 30), price=Decimal("102.65"),
+        dividend_yield=Decimal("11.70"),
+    )
+    # Cotacao de um ticker que o usuario nao possui: nao deve aparecer.
+    MarketQuote.objects.create(
+        ticker="BTLG11", as_of_date=date(2026, 8, 30), price=Decimal("99.45"),
+    )
+
+    documents = [doc for doc in build_user_documents(user) if doc.source_type == "market_quotes"]
+
+    assert len(documents) == 1
+    content = documents[0].content
+    assert "PMLL11" in content and "102,65" in content and "11.70%" in content
+    assert "BTLG11" not in content
+
+
+@pytest.mark.django_db
+def test_market_quotes_document_ignores_fixed_income_codes(user, connection):
+    """`Investment.code` de renda fixa pode ser um CNPJ ou codigo de
+    debenture/CRA, nunca um ticker -- nao deve nem entrar na busca de cotacao.
+    Ver `market_data.held_tickers` e `TRADABLE_DISPLAY_CATEGORIES`."""
+    Investment.objects.create(
+        connection=connection,
+        external_id="i1",
+        name="CRA XPTO",
+        kind="FIXED_INCOME",
+        code="CRA024002ML",
+    )
+
+    types = {doc.source_type for doc in build_user_documents(user)}
+
+    assert "market_quotes" not in types
 
 
 @pytest.mark.django_db

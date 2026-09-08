@@ -9,6 +9,9 @@ from .models import (
     FinancialInstitution,
     Investment,
     InvestmentPosition,
+    InvestmentTransaction,
+    MarketIndexRate,
+    MarketQuote,
     NetWorthSnapshot,
     PensionPlan,
     SyncJob,
@@ -22,8 +25,11 @@ admin.site.register(Card)
 admin.site.register(Transaction)
 admin.site.register(Investment)
 admin.site.register(InvestmentPosition)
+admin.site.register(InvestmentTransaction)
 admin.site.register(PensionPlan)
 admin.site.register(NetWorthSnapshot)
 admin.site.register(FinancialGoal)
 admin.site.register(SyncJob)
 admin.site.register(CategorizationRule)
+admin.site.register(MarketIndexRate)
+admin.site.register(MarketQuote)

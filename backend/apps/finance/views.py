@@ -69,6 +69,11 @@ from .models import (
     Transaction,
 )
 from .pagination import UnboundedCollectionPagination
+from .portfolio_risk import (
+    build_currency_exposure,
+    build_indexer_concentration,
+    build_issuer_concentration,
+)
 from .serializers import (
     AccountSerializer,
     BudgetBucketTargetInputSerializer,
@@ -91,6 +96,7 @@ from .serializers import (
     PensionPlanSerializer,
     PortfolioBuilderReportSerializer,
     PortfolioReportSerializer,
+    PortfolioRiskSerializer,
     PortfolioTargetInputSerializer,
     PortfolioTargetSerializer,
     RegisterSerializer,
@@ -196,7 +202,7 @@ class AccountViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         return Account.objects.filter(connection__user=self.request.user).select_related(
-            "connection", "connection__identity"
+            "connection", "connection__identity", "connection__institution"
         )
 
 
@@ -295,6 +301,25 @@ class InvestmentPositionViewSet(viewsets.ReadOnlyModelViewSet):
         return InvestmentPosition.objects.filter(
             investment__connection__user=self.request.user
         ).select_related("investment")
+
+
+class PortfolioRiskAPIView(APIView):
+    """Diagnostico de concentracao da carteira: emissor, indexador e moeda.
+
+    So leitura -- os tres calculos vem de `portfolio_risk.py`, sem persistencia
+    propria (mesmo raciocinio de `FinancialSummaryAPIView`: recalculado a cada
+    chamada a partir da posicao mais recente de cada investimento).
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        risk = {
+            "issuer_concentration": build_issuer_concentration(request.user),
+            "indexer_concentration": build_indexer_concentration(request.user),
+            "currency_exposure": build_currency_exposure(request.user),
+        }
+        return Response(PortfolioRiskSerializer(risk).data)
 
 
 class PensionPlanViewSet(viewsets.ModelViewSet):

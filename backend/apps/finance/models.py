@@ -259,6 +259,13 @@ class InvestmentPosition(TimeStampedModel):
     amount_profit = models.DecimalField(max_digits=16, decimal_places=2, null=True, blank=True)
     amount_withdrawal = models.DecimalField(max_digits=16, decimal_places=2, null=True, blank=True)
     amount_original = models.DecimalField(max_digits=16, decimal_places=2, null=True, blank=True)
+    # Fallback de `amount_original` (custo medio pelas transacoes brutas da
+    # Pluggy, ver `investment_cost_basis.py`), so preenchido quando a Pluggy nao
+    # manda `amountOriginal` no payload -- comum em Acoes/FIIs negociados em
+    # bolsa. Fica em campo separado para nao misturar dado bruto com estimado.
+    estimated_amount_original = models.DecimalField(
+        max_digits=16, decimal_places=2, null=True, blank=True
+    )
     price_factor = models.DecimalField(max_digits=16, decimal_places=6, null=True, blank=True)
     status = models.CharField(max_length=20, blank=True)
     purchase_date = models.DateField(null=True, blank=True)
@@ -266,6 +273,34 @@ class InvestmentPosition(TimeStampedModel):
 
     class Meta:
         unique_together = ("investment", "as_of_date")
+
+
+class InvestmentTransactionType(models.TextChoices):
+    BUY = "BUY", "Compra"
+    SELL = "SELL", "Venda"
+    TAX = "TAX", "Imposto"
+    TRANSFER = "TRANSFER", "Transferência"
+    INTEREST = "INTEREST", "Juros/Rendimento"
+    AMORTIZATION = "AMORTIZATION", "Amortização"
+
+
+class InvestmentTransaction(TimeStampedModel):
+    """Historico bruto de compra/venda/etc. da Pluggy (`GET
+    /investments/{id}/transactions`), usado para calcular custo medio quando a
+    Pluggy nao manda `amountOriginal` -- ver `investment_cost_basis.py`.
+    """
+
+    investment = models.ForeignKey(
+        Investment, on_delete=models.CASCADE, related_name="transactions"
+    )
+    external_id = models.CharField(max_length=255, unique=True)
+    type = models.CharField(max_length=20, choices=InvestmentTransactionType.choices)
+    quantity = models.DecimalField(max_digits=20, decimal_places=8, null=True, blank=True)
+    amount = models.DecimalField(max_digits=16, decimal_places=2, null=True, blank=True)
+    date = models.DateField()
+
+    class Meta:
+        ordering = ["date"]
 
 
 class PensionPlan(TimeStampedModel):
@@ -287,6 +322,56 @@ class PensionPlan(TimeStampedModel):
     annual_rate = models.DecimalField(max_digits=10, decimal_places=4, null=True, blank=True)
     amount_profit = models.DecimalField(max_digits=16, decimal_places=2, null=True, blank=True)
     amount_original = models.DecimalField(max_digits=16, decimal_places=2, null=True, blank=True)
+
+
+class MarketIndexKind(models.TextChoices):
+    SELIC = "selic", "Selic"
+    CDI = "cdi", "CDI"
+    IPCA = "ipca", "IPCA"
+
+
+class MarketIndexRate(TimeStampedModel):
+    """Taxa diaria/mensal de um indice de referencia, direto do Bacen SGS.
+
+    Dado publico de mercado, sem informacao pessoal do usuario -- ao contrario do
+    contexto enviado a IA, nao ha por que restringir a origem a um host local.
+    Sem `user`: um mesmo ponto (indice, data) vale para todo mundo.
+    """
+
+    kind = models.CharField(max_length=10, choices=MarketIndexKind.choices)
+    reference_date = models.DateField()
+    value = models.DecimalField(max_digits=12, decimal_places=6)
+
+    class Meta:
+        unique_together = ("kind", "reference_date")
+        ordering = ["-reference_date"]
+
+    def __str__(self) -> str:
+        return f"{self.kind} {self.reference_date}: {self.value}"
+
+
+class MarketQuote(TimeStampedModel):
+    """Cotacao mais recente de um ticker que o usuario efetivamente possui.
+
+    Dado publico (mesmo raciocinio de `MarketIndexRate`, sem `user`), mas ao
+    contrario dela e escopado: so existe para tickers vistos em algum
+    `Investment.code`, nunca a lista completa do mercado -- ver
+    `market_data.held_tickers()`.
+    """
+
+    ticker = models.CharField(max_length=20)
+    as_of_date = models.DateField()
+    price = models.DecimalField(max_digits=14, decimal_places=4)
+    dividend_yield = models.DecimalField(max_digits=10, decimal_places=4, null=True, blank=True)
+    name = models.CharField(max_length=255, blank=True)
+    source = models.CharField(max_length=30, default="brapi")
+
+    class Meta:
+        unique_together = ("ticker", "as_of_date")
+        ordering = ["-as_of_date"]
+
+    def __str__(self) -> str:
+        return f"{self.ticker} {self.as_of_date}: {self.price}"
 
 
 class NetWorthSnapshot(TimeStampedModel):

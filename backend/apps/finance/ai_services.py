@@ -18,6 +18,7 @@ from .consolidation import (
     build_user_financial_summary,
     latest_positions_by_investment,
 )
+from .investment_categories import TRADABLE_DISPLAY_CATEGORIES, classify_display_category
 from .models import (
     EMBEDDING_DIMENSIONS,
     Account,
@@ -32,6 +33,9 @@ from .models import (
     Identity,
     Investment,
     InvestmentPosition,
+    MarketIndexKind,
+    MarketIndexRate,
+    MarketQuote,
     PensionPlan,
     SyncJob,
     Transaction,
@@ -466,6 +470,68 @@ def _build_pension_document(user) -> Document | None:
     )
 
 
+def _build_market_rates_document(user) -> Document | None:
+    """Indices de referencia (Selic, CDI, IPCA) mais recentes, do Bacen SGS.
+
+    Sem isto, "compare com CDI, IPCA ou Ibovespa quando fizer sentido" (pedido
+    explicito nos prompts de relatorio de portfolio e executivo) so podia ser
+    atendido de memoria pela LLM -- desatualizado e sujeito a alucinacao. Nao
+    depende do `user` (dado publico), mas segue o mesmo contrato `Document` por
+    usuario dos demais dominios, para entrar no indice RAG normalmente.
+    """
+    latest_by_kind: dict[str, MarketIndexRate] = {}
+    for rate in MarketIndexRate.objects.order_by("kind", "-reference_date"):
+        latest_by_kind.setdefault(rate.kind, rate)
+    if not latest_by_kind:
+        return None
+
+    lines = ["# Indices de referencia (mais recentes)"]
+    for kind, rate in sorted(latest_by_kind.items()):
+        label = MarketIndexKind(kind).label
+        lines.append(f"- {label}: {rate.value:.6f}% em {rate.reference_date}")
+    return Document(
+        source_type="market_rates",
+        source_id=str(user.pk),
+        content="\n".join(lines),
+        metadata={"count": len(latest_by_kind)},
+    )
+
+
+def _build_market_quotes_document(user) -> Document | None:
+    """Cotacao mais recente dos tickers que o usuario efetivamente possui.
+
+    Ao contrario de `_build_market_rates_document` (indices gerais, iguais para
+    todo mundo), este e filtrado por `Investment.code` do proprio usuario --
+    fecha a lacuna de "quanto vale meu FII/acao hoje" sem depender da LLM
+    adivinhar (os prompts ja proibem citar ticker sem dado real no contexto).
+    """
+    tickers = [
+        investment.code
+        for investment in Investment.objects.filter(connection__user=user).exclude(code="")
+        if classify_display_category(investment).key in TRADABLE_DISPLAY_CATEGORIES
+    ]
+    if not tickers:
+        return None
+
+    latest_by_ticker: dict[str, MarketQuote] = {}
+    for quote in MarketQuote.objects.filter(ticker__in=tickers).order_by("ticker", "-as_of_date"):
+        latest_by_ticker.setdefault(quote.ticker, quote)
+    if not latest_by_ticker:
+        return None
+
+    lines = ["# Cotacoes de mercado dos seus ativos"]
+    for ticker in sorted(latest_by_ticker):
+        quote = latest_by_ticker[ticker]
+        dy_text = f", DY {quote.dividend_yield:.2f}%" if quote.dividend_yield is not None else ""
+        lines.append(f"- {ticker}: {_format_amount(quote.price)} em {quote.as_of_date}{dy_text}")
+    return Document(
+        source_type="market_quotes",
+        source_id=str(user.pk),
+        content="\n".join(lines),
+        metadata={"count": len(latest_by_ticker)},
+    )
+
+
 def _build_identity_document(user) -> Document | None:
     """Perfil declarado ao banco (Pluggy `/identity`), quando ha algo a dizer.
 
@@ -583,7 +649,12 @@ def _build_future_projection_document(user) -> Document | None:
     from .projections import build_future_projection, serialize_future_projection
 
     data = serialize_future_projection(build_future_projection(user))
-    if not data["scenarios"]:
+    # `scenarios` sempre tem as 3 chaves (conservador/base/agressivo), mesmo com
+    # tudo zerado -- `build_future_projection` projeta a partir do patrimonio e
+    # aporte atuais, nunca omite cenario. "Sem dado" e patrimonio e aporte
+    # ambos zero (usuario recem-cadastrado, nada sincronizado ainda), nao
+    # `scenarios` vazio, que nunca acontece.
+    if not data["current_net_worth"] and not data["monthly_contribution"]:
         return None
     lines = ["# Simulacao de futuro financeiro", *_render_projection_lines(data)]
     return Document(
@@ -863,6 +934,8 @@ def build_user_documents(user) -> list[Document]:
         _build_cards_document,
         _build_investments_document,
         _build_pension_document,
+        _build_market_rates_document,
+        _build_market_quotes_document,
         _build_identity_document,
         _build_goals_document,
         _build_future_projection_document,
@@ -1093,7 +1166,7 @@ class RAGService:
         carteira e sugerir aportes e o pedido mais comum deste relatorio -- sem
         isso a resposta dependia da sorte da busca semantica.
         """
-        anchor_types = (SUMMARY_SOURCE_TYPE, "investments")
+        anchor_types = (SUMMARY_SOURCE_TYPE, "investments", "market_rates", "market_quotes")
         context = []
         anchored_types = set()
         for source_type in anchor_types:
@@ -1176,6 +1249,8 @@ class RAGService:
             "goals",
             "future_projection",
             "portfolio_allocation",
+            "market_rates",
+            "market_quotes",
         )
         context = []
         for source_type in anchor_types:
@@ -1234,6 +1309,9 @@ class LLMService:
             "Com base nos dados reais do usuário abaixo, gere um relatório estruturado em JSON.\n\n"
             "Regras obrigatórias:\n"
             "- Use apenas os dados fornecidos; não invente valores, instituições, fundos ou tickers.\n"
+            "- Pode citar o ticker de um fundo/ação apenas se ele aparecer no contexto de cotações "
+            "(`market_quotes`) ou de índices (`market_rates`) abaixo; nunca cite ticker que não "
+            "esteja explicitamente no contexto.\n"
             "- Formate valores monetários no padrão brasileiro: separador de milhar '.', separador "
             "decimal ',' e prefixo 'R$ ' (ex.: R$ 1.234,56). Nunca use o padrão americano (1,234.56).\n"
             "- Cada item das listas deve ser uma frase única em texto simples (string), nunca um "
@@ -1244,9 +1322,11 @@ class LLMService:
             "- strengths: lista de frases com pontos fortes\n"
             "- weaknesses: lista de frases com pontos de atenção\n"
             "- adjustments: lista de frases avaliando a performance dos fundos e aplicações atuais "
-            "(use a variação de cota e a distribuição por tipo de ativo do contexto de investimentos; "
-            "compare com referências conhecidas como CDI, IPCA ou Ibovespa quando fizer sentido) e "
-            "apontando concentração de risco por tipo de ativo\n"
+            "(use a variação de cota e a distribuição por tipo de ativo do contexto de "
+            "investimentos, e a cotação/dividend yield mais recentes do contexto de cotações "
+            "quando o ticker aparecer lá; compare com os índices de referência do contexto — "
+            "CDI, IPCA, Selic — quando fizer sentido) e apontando concentração de risco por "
+            "tipo de ativo\n"
             "- suggestions: lista de frases sugerindo classes de fundos ou FIIs (ex.: FII de papel, "
             "FII de tijolo, fundo multimercado, renda fixa, Tesouro Direto) que ajudariam a "
             "diversificar a carteira atual, cada uma com uma justificativa curta ligada à lacuna "
@@ -1479,9 +1559,10 @@ class LLMService:
             "- Formate valores monetários no padrão brasileiro: separador de milhar '.', "
             "separador decimal ',' e prefixo 'R$ ' (ex.: R$ 1.234,56). Nunca use o padrão "
             "americano (1,234.56).\n"
-            "- Nunca cite ticker ou nome de fundo específico, pois você não tem acesso a "
-            "dados de mercado atualizados; fale em classes de ativo (ex.: renda fixa, "
-            "Tesouro Direto, fundo multimercado, ações internacionais).\n"
+            "- Só cite ticker ou nome de fundo específico se ele aparecer explicitamente no "
+            "contexto de cotações (`market_quotes`) ou de índices (`market_rates`) abaixo; "
+            "nunca invente ticker que não esteja lá. Fora esses casos, fale em classes de "
+            "ativo (ex.: renda fixa, Tesouro Direto, fundo multimercado, ações internacionais).\n"
             "- Cada item das listas deve ser uma frase única em texto simples (string), "
             "nunca um objeto ou par chave/valor.\n\n"
             f"Alocação (alvo x atual):\n{drift_text}\n\n"
@@ -1497,8 +1578,9 @@ class LLMService:
             "houver meta com data-alvo\n"
             "- performance_verdict: lista de frases avaliando a rentabilidade de cada "
             "investimento ou classe de ativo (use a variação de cota, rentabilidade do "
-            "mês/ano e concentração do contexto de investimentos) e sinalizando quando "
-            "vale considerar mover recursos para outra classe, sem citar fundo específico\n"
+            "mês/ano e concentração do contexto de investimentos, e a cotação/dividend "
+            "yield mais recentes do contexto de cotações quando o ticker aparecer lá) e "
+            "sinalizando quando vale considerar mover recursos para outra classe\n"
             "- contribution_rationale: lista de frases explicando o motivo do valor "
             "sugerido de aporte em cada classe do plano acima, sem alterar os valores\n"
         )
@@ -1568,9 +1650,9 @@ class LLMService:
             "'.', separador decimal ',' e prefixo 'R$ ' (ex.: R$ 1.234,56). Nunca use "
             "o padrão americano (1,234.56).\n"
             "- Isto não é recomendação de investimento; ao sugerir algo, fale em "
-            "classes de ativo (ex.: Tesouro Selic, fundo multimercado, ETF de ações), "
-            "nunca cite fundo ou ticker específico, pois você não tem dados de "
-            "mercado atualizados.\n"
+            "classes de ativo (ex.: Tesouro Selic, fundo multimercado, ETF de ações) e "
+            "nunca cite fundo ou ticker que não apareça no contexto abaixo -- você não "
+            "tem dados de mercado para ativos fora dele.\n"
             "- Responda de forma direta e natural, como numa conversa, sem repetir a "
             "pergunta nem devolver JSON.\n\n"
             f"Dados financeiros do usuário:\n{context_text}\n\n"

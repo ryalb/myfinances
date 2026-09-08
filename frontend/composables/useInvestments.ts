@@ -32,6 +32,7 @@ export type InvestmentPosition = {
   rate: string | null
   amount_profit: string | null
   amount_original: string | null
+  estimated_amount_original: string | null
   status: string
   purchase_date: string | null
   grace_period_date: string | null
@@ -96,18 +97,97 @@ export function useInvestments() {
     return byInvestment
   })
 
+  const positionsByInvestment = computed(() => {
+    const byInvestment = new Map<number, InvestmentPosition[]>()
+    for (const position of positions.value || []) {
+      const list = byInvestment.get(position.investment)
+      if (list) list.push(position)
+      else byInvestment.set(position.investment, [position])
+    }
+    for (const list of byInvestment.values()) {
+      list.sort((a, b) => new Date(a.as_of_date).getTime() - new Date(b.as_of_date).getTime())
+    }
+    return byInvestment
+  })
+
+  const MS_PER_DAY = 24 * 60 * 60 * 1000
+
+  // A Pluggy nem sempre manda `lastMonthRate`/`lastTwelveMonthsRate` (visto em
+  // Renda Fixa e Acoes/FIIs igualmente) -- quando falta, estima a partir do
+  // historico local de posicoes (`InvestmentPosition` guarda uma linha por dia
+  // sincronizado). So estima se achar uma posicao proxima o bastante da data alvo
+  // e com a mesma quantidade: se a quantidade mudou no meio (aporte/resgate), a
+  // variacao de `market_value` mistura rendimento com movimentacao de caixa e o
+  // numero sai errado, entao prefere '-' a um numero enganoso.
+  const estimateRate = (
+    investmentId: number,
+    referenceDate: string,
+    currentQuantity: number,
+    currentValue: number,
+    targetDaysAgo: number,
+    toleranceDays: number,
+  ): number | null => {
+    const list = positionsByInvestment.value.get(investmentId)
+    if (!list || list.length < 2) return null
+
+    const targetTime = new Date(referenceDate).getTime() - targetDaysAgo * MS_PER_DAY
+
+    let closest: InvestmentPosition | null = null
+    let closestDiff = Infinity
+    for (const position of list) {
+      const diff = Math.abs(new Date(position.as_of_date).getTime() - targetTime)
+      if (diff < closestDiff) {
+        closest = position
+        closestDiff = diff
+      }
+    }
+    if (!closest || closestDiff > toleranceDays * MS_PER_DAY) return null
+    if (toNumber(closest.quantity) !== currentQuantity) return null
+
+    const oldValue = toNumber(closest.market_value)
+    if (oldValue === null || oldValue <= 0) return null
+    return (currentValue / oldValue - 1) * 100
+  }
+
   const rows = computed<InvestmentRow[]>(() => {
     return (investments.value || []).map((investment) => {
       const position = latestPositionByInvestment.value.get(investment.id) || null
+      const marketValue = toNumber(position?.market_value) || 0
+      // `amount_original` bruto da Pluggy, com fallback pro custo medio estimado
+      // via `InvestmentTransaction` (backend so preenche esse quando falta o
+      // bruto -- ver `investment_cost_basis.py`).
+      const amountOriginal =
+        toNumber(position?.amount_original ?? null) ??
+        toNumber(position?.estimated_amount_original ?? null)
+      const quantity = toNumber(position?.quantity ?? null)
+
+      // Fallback de lucro: mesma formula recomendada pela propria Pluggy quando
+      // `amountProfit` vem nulo (valor atual - valor originalmente investido).
+      let amountProfit = toNumber(position?.amount_profit ?? null)
+      if (amountProfit === null && amountOriginal !== null) {
+        amountProfit = marketValue - amountOriginal
+      }
+
+      let lastMonthRate = toNumber(position?.last_month_rate ?? null)
+      let lastTwelveMonthsRate = toNumber(position?.last_twelve_months_rate ?? null)
+      if (position && quantity !== null) {
+        if (lastMonthRate === null) {
+          lastMonthRate = estimateRate(investment.id, position.as_of_date, quantity, marketValue, 30, 7)
+        }
+        if (lastTwelveMonthsRate === null) {
+          lastTwelveMonthsRate = estimateRate(investment.id, position.as_of_date, quantity, marketValue, 365, 20)
+        }
+      }
+
       return {
         investment,
         position,
-        marketValue: toNumber(position?.market_value) || 0,
-        lastMonthRate: toNumber(position?.last_month_rate ?? null),
-        lastTwelveMonthsRate: toNumber(position?.last_twelve_months_rate ?? null),
+        marketValue,
+        lastMonthRate,
+        lastTwelveMonthsRate,
         annualRate: toNumber(position?.annual_rate ?? null),
-        amountProfit: toNumber(position?.amount_profit ?? null),
-        amountOriginal: toNumber(position?.amount_original ?? null),
+        amountProfit,
+        amountOriginal,
       }
     })
   })

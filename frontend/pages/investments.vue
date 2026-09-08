@@ -3,6 +3,7 @@ import { useUiStore } from '@/stores/ui'
 import { formatBRL, formatPercent } from '@/composables/useCurrency'
 import { formatIsoDate } from '@/composables/useDateFormat'
 import { useInvestments } from '@/composables/useInvestments'
+import { usePortfolioRisk } from '@/composables/usePortfolioRisk'
 import CompositionBar from '@/components/investments/CompositionBar.vue'
 
 definePageMeta({
@@ -13,6 +14,7 @@ const uiStore = useUiStore()
 const blurClass = computed(() => (uiStore.isFinancialValueBlurred ? 'blur-sm select-none' : ''))
 
 const { investments, groups, totalValue, totalProfit, compositionSegments } = useInvestments()
+const { issuerSegments, indexerSegments, currencySegments } = usePortfolioRisk()
 
 const signClass = (value: number | null): string => {
   if (value === null || value === 0) return 'text-sepia-400'
@@ -55,6 +57,28 @@ const secondaryInfo = (investment: { code: string; issuer: string; due_date: str
       <div class="rounded-lg border border-sepia-200 bg-white p-5 shadow-sm">
         <h3 class="mb-4 text-base font-semibold text-sepia-900">Composição da carteira</h3>
         <CompositionBar :segments="compositionSegments" />
+      </div>
+
+      <div class="rounded-lg border border-sepia-200 bg-white p-5 shadow-sm">
+        <h3 class="mb-1 text-base font-semibold text-sepia-900">Diagnóstico de concentração</h3>
+        <p class="mb-4 text-xs text-sepia-400">
+          Riscos que não aparecem olhando produto por produto: quanto a carteira depende do mesmo
+          emissor, do mesmo indexador ou de uma única moeda.
+        </p>
+        <div class="space-y-5">
+          <div>
+            <h4 class="mb-2 text-sm font-medium text-sepia-700">Por emissor</h4>
+            <CompositionBar :segments="issuerSegments" />
+          </div>
+          <div>
+            <h4 class="mb-2 text-sm font-medium text-sepia-700">Por indexador</h4>
+            <CompositionBar :segments="indexerSegments" />
+          </div>
+          <div>
+            <h4 class="mb-2 text-sm font-medium text-sepia-700">Por moeda</h4>
+            <CompositionBar :segments="currencySegments" />
+          </div>
+        </div>
       </div>
 
       <NuxtLink

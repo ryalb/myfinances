@@ -31,6 +31,7 @@ from apps.finance.views import (
     PluggyWebhookAPIView,
     PortfolioBuilderAPIView,
     PortfolioReportAPIView,
+    PortfolioRiskAPIView,
     PortfolioTargetsAPIView,
     RegisterAPIView,
     SubscriptionPaymentViewSet,
@@ -76,6 +77,11 @@ urlpatterns = [
         "api/v1/portfolio-targets/",
         PortfolioTargetsAPIView.as_view(),
         name="portfolio-targets",
+    ),
+    path(
+        "api/v1/portfolio-risk/",
+        PortfolioRiskAPIView.as_view(),
+        name="portfolio-risk",
     ),
     path(
         "api/v1/budget-bucket-targets/",

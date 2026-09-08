@@ -19,6 +19,7 @@ const { data: accounts } = await useFetch<
     currency: string
     balance: number
     available_balance: number
+    institution_name: string
     identity: {
       full_name: string
       document: string
@@ -43,6 +44,16 @@ const typeColors: Record<string, string> = {
   other: 'bg-sepia-100 text-sepia-600',
 }
 
+// Alguns bancos mandam `name` generico (igual ao label do tipo, ex. "Conta
+// Corrente") pra toda conta desse tipo, sem apelido proprio -- nesse caso o
+// nome da instituicao distingue melhor as contas do que repetir o tipo.
+const displayName = (account: { name: string; type: string; institution_name: string }) => {
+  const name = account.name?.trim()
+  const genericLabel = typeLabels[account.type] || account.type
+  if (!name || name === genericLabel) return account.institution_name || name || genericLabel
+  return name
+}
+
 const uiStore = useUiStore()
 </script>
 
@@ -64,7 +75,7 @@ const uiStore = useUiStore()
       >
         <div class="flex items-start justify-between">
           <div>
-            <h3 class="font-semibold text-sepia-900">{{ account.name }}</h3>
+            <h3 class="font-semibold text-sepia-900">{{ displayName(account) }}</h3>
             <span :class="['mt-1 inline-block rounded-full px-2 py-0.5 text-xs font-medium', typeColors[account.type] || typeColors.other]">
               {{ typeLabels[account.type] || account.type }}
             </span>

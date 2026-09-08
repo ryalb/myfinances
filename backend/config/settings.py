@@ -1,6 +1,7 @@
 import logging
 import os
 import sys
+from datetime import timedelta
 from pathlib import Path
 
 from celery.schedules import crontab
@@ -200,6 +201,14 @@ REST_FRAMEWORK = {
     },
 }
 
+# Default do SimpleJWT e 5min de access token -- curto demais para uso pessoal
+# continuo (o app nao tem risco de sessao roubada que justifique isso). Refresh
+# token continua no default (1 dia); sem ROTATE_REFRESH_TOKENS, o mesmo
+# refresh token vale para todo o dia, reusado a cada renovacao.
+SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=60),
+}
+
 GRAPHENE = {"SCHEMA": "config.schema.schema"}
 
 CORS_ALLOWED_ORIGINS = [
@@ -226,8 +235,8 @@ CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
 
 # Precisa de `celery -A config beat` rodando (mise run backend-beat), senao
-# nada aqui dispara. As duas tasks sao idempotentes por dia, entao um beat que
-# ficou fora do ar so perde pontos do periodo -- reexecutar nao duplica nada.
+# nada aqui dispara. As tasks sao idempotentes por dia, entao um beat que ficou
+# fora do ar so perde pontos do periodo -- reexecutar nao duplica nada.
 CELERY_BEAT_SCHEDULE = {
     "snapshot-patrimonio-diario": {
         "task": "apps.finance.tasks.snapshot_all_users",
@@ -238,6 +247,15 @@ CELERY_BEAT_SCHEDULE = {
     "reconciliar-assinaturas-diario": {
         "task": "apps.finance.tasks.reconcile_all_subscriptions",
         "schedule": crontab(hour=3, minute=30),
+    },
+    "sincronizar-indices-mercado-diario": {
+        "task": "apps.finance.tasks.sync_market_data",
+        # Series do Bacen SGS costumam publicar o ponto do dia anterior de manha.
+        "schedule": crontab(hour=6, minute=0),
+    },
+    "sincronizar-cotacoes-mercado-diario": {
+        "task": "apps.finance.tasks.sync_market_quotes",
+        "schedule": crontab(hour=6, minute=15),
     },
 }
 

@@ -25,7 +25,7 @@ cp backend/.env.example backend/.env
 - **Full dev stack**: `mise run dev` (backend + frontend concurrently).
 - **Backend only**: `mise run backend-dev` (auto-runs migrations first).
 - **Celery worker**: `mise run backend-worker`.
-- **Backend tests**: `cd backend && uv run python manage.py test`.
+- **Backend tests**: `cd backend && uv run pytest` (pytest-django; `manage.py test` finds 0 tests since fixtures/marks are pytest-only).
 - **Backend quality**: `mise run backend-lint`, `mise run backend-typecheck`, `mise run backend-test`.
 - **Frontend dev**: `mise run frontend-dev`.
 - **Frontend build**: `mise run frontend-build`.

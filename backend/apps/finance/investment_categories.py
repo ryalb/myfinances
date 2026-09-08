@@ -31,6 +31,13 @@ _LABELS = {
     "other": "Outros",
 }
 
+# Categorias com ticker de fato negociado na B3. Renda fixa, fundos nao
+# listados e COE ficam de fora -- `Investment.code` para eles pode ser um CNPJ
+# de emissor ou codigo de debenture/CRA, nunca um ticker (usado por
+# `market_data.held_tickers()` e pelo documento RAG de cotacoes).
+TRADABLE_DISPLAY_CATEGORIES = {"fii", "equity_br", "equity_intl", "etf"}
+
+
 
 @dataclass(frozen=True)
 class DisplayCategory:

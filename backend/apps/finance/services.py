@@ -317,6 +317,28 @@ class PluggyClient:
         data = response.json()
         return data.get("results", [])
 
+    def fetch_investment_transactions(self, investment_id: str) -> list[dict]:
+        """`GET /investments/{id}/transactions` -- nao vem embutido na lista de
+        `fetch_item_investments`, precisa de uma chamada por investimento.
+        """
+        url = f"{self.base_url}/investments/{investment_id}/transactions"
+
+        logger.info("Pluggy fetch_investment_transactions investment_id=%s", investment_id)
+        results: list[dict] = []
+        page = 1
+        while True:
+            response = self._request_with_retry(
+                "GET", url, params={"page": page, "pageSize": 500}
+            )
+            response.raise_for_status()
+            data = response.json()
+            results.extend(data.get("results", []))
+            total_pages = data.get("totalPages", 1)
+            if page >= total_pages:
+                break
+            page += 1
+        return results
+
     def create_connect_token(self, client_user_id: str | None = None) -> dict:
         url = f"{self.base_url}/connect_token"
         options: dict[str, str] = {}

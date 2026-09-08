@@ -74,6 +74,12 @@ class ConnectionSerializer(serializers.ModelSerializer):
 
 class AccountSerializer(serializers.ModelSerializer):
     identity = serializers.SerializerMethodField()
+    # Fallback de nome na tela: alguns bancos mandam `name` generico ("Conta
+    # Corrente", igual ao label do `type`) para toda conta do mesmo tipo, sem
+    # apelido proprio -- mesmo campo que `TransactionSerializer.institution_name`
+    # ja resolve para o extrato, aqui pra tela de contas distinguir contas do
+    # mesmo tipo em instituicoes diferentes.
+    institution_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Account
@@ -88,11 +94,15 @@ class AccountSerializer(serializers.ModelSerializer):
             "balance",
             "available_balance",
             "identity",
+            "institution_name",
         )
 
     def get_identity(self, obj):
         identity = getattr(obj.connection, "identity", None)
         return IdentitySerializer(identity).data if identity else None
+
+    def get_institution_name(self, obj):
+        return obj.connection.institution.name
 
 
 class TransactionSerializer(serializers.ModelSerializer):
@@ -253,6 +263,27 @@ class MonthlyCashFlowSerializer(serializers.Serializer):
     expenses = serializers.DecimalField(max_digits=16, decimal_places=2)
     savings = serializers.DecimalField(max_digits=16, decimal_places=2)
     savings_rate = serializers.DecimalField(max_digits=10, decimal_places=2)
+
+
+class PortfolioConcentrationRowSerializer(serializers.Serializer):
+    key = serializers.CharField()
+    label = serializers.CharField()
+    amount = serializers.DecimalField(max_digits=16, decimal_places=2)
+    percentage = serializers.DecimalField(max_digits=5, decimal_places=2)
+
+
+class PortfolioCurrencyExposureSerializer(serializers.Serializer):
+    brl_amount = serializers.DecimalField(max_digits=16, decimal_places=2)
+    brl_percentage = serializers.DecimalField(max_digits=5, decimal_places=2)
+    foreign_amount = serializers.DecimalField(max_digits=16, decimal_places=2)
+    foreign_percentage = serializers.DecimalField(max_digits=5, decimal_places=2)
+    by_currency = PortfolioConcentrationRowSerializer(many=True)
+
+
+class PortfolioRiskSerializer(serializers.Serializer):
+    issuer_concentration = PortfolioConcentrationRowSerializer(many=True)
+    indexer_concentration = PortfolioConcentrationRowSerializer(many=True)
+    currency_exposure = PortfolioCurrencyExposureSerializer()
 
 
 class CategoryTotalSerializer(serializers.Serializer):
@@ -651,6 +682,7 @@ class InvestmentPositionSerializer(serializers.ModelSerializer):
             "rate",
             "amount_profit",
             "amount_original",
+            "estimated_amount_original",
             "status",
             "purchase_date",
             "grace_period_date",

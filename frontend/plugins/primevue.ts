@@ -22,6 +22,20 @@ const SEPIA = {
 const SepiaAura = definePreset(Aura, {
   semantic: {
     primary: SEPIA,
+    // `primary` sozinho não alcança overlay (Popover, dropdown, tooltip): esses
+    // usam o grupo semântico `overlay`, com token próprio por componente
+    // (`overlay.popover.*` etc.), então saíam no cinza generico do Aura mesmo
+    // com `primary` já sepia. Alinhado ao cartão branco padrão do app
+    // (`bg-white border-sepia-200 shadow-sm rounded-lg`).
+    overlay: {
+      popover: {
+        background: "#ffffff",
+        borderColor: SEPIA[200],
+        color: SEPIA[800],
+        borderRadius: "0.5rem",
+        shadow: "0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)",
+      },
+    },
   },
 })
 

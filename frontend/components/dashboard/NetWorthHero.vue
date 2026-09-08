@@ -1,12 +1,20 @@
 <script setup lang="ts">
 import { formatBRL } from '@/composables/useCurrency'
 import { useUiStore } from '@/stores/ui'
+import Popover from 'primevue/popover'
 
 const props = defineProps<{
   netWorth: number
   assets: number
   liabilities: number
   history: { date: string; net_worth: number }[]
+  breakdown: {
+    cash: number
+    investments: number
+    pension: number
+    debts: number
+    creditCards: number
+  }
 }>()
 
 const uiStore = useUiStore()
@@ -20,6 +28,24 @@ const trend = computed(() => {
 })
 
 const blur = computed(() => (uiStore.isFinancialValueBlurred ? 'blur-sm select-none' : ''))
+
+// Racional do calculo de Ativos/Passivos (build_user_financial_summary no
+// backend): cada total e a soma destas categorias, nunca um numero avulso.
+const assetsBreakdown = computed(() => [
+  { label: 'Caixa', value: props.breakdown.cash },
+  { label: 'Investimentos', value: props.breakdown.investments },
+  { label: 'Previdência', value: props.breakdown.pension },
+])
+
+const liabilitiesBreakdown = computed(() => [
+  { label: 'Cartões de crédito', value: props.breakdown.creditCards },
+  { label: 'Dívidas', value: props.breakdown.debts },
+])
+
+const assetsPopover = ref()
+const liabilitiesPopover = ref()
+const assetsBlock = ref()
+const liabilitiesBlock = ref()
 </script>
 
 <template>
@@ -36,15 +62,53 @@ const blur = computed(() => (uiStore.isFinancialValueBlurred ? 'blur-sm select-n
       </div>
 
       <dl class="grid grid-cols-2 gap-x-8 gap-y-2 sm:gap-x-12">
-        <div>
-          <dt class="text-xs uppercase tracking-wide text-sepia-400">Ativos</dt>
+        <div ref="assetsBlock">
+          <dt>
+            <button
+              type="button"
+              class="flex items-center gap-1 text-xs uppercase tracking-wide text-sepia-400 hover:text-sepia-600"
+              @click="(event) => assetsPopover.toggle(event, assetsBlock)"
+            >
+              Ativos
+              <Icon icon="mdi:information-outline" class="h-3 w-3" />
+            </button>
+          </dt>
           <dd :class="['mt-1 font-mono text-lg font-semibold text-sepia-800', blur]">{{ formatBRL(assets) }}</dd>
         </div>
-        <div>
-          <dt class="text-xs uppercase tracking-wide text-sepia-400">Passivos</dt>
+        <div ref="liabilitiesBlock">
+          <dt>
+            <button
+              type="button"
+              class="flex items-center gap-1 text-xs uppercase tracking-wide text-sepia-400 hover:text-sepia-600"
+              @click="(event) => liabilitiesPopover.toggle(event, liabilitiesBlock)"
+            >
+              Passivos
+              <Icon icon="mdi:information-outline" class="h-3 w-3" />
+            </button>
+          </dt>
           <dd :class="['mt-1 font-mono text-lg font-semibold text-vermelho-700', blur]">{{ formatBRL(liabilities) }}</dd>
         </div>
       </dl>
     </div>
+
+    <Popover ref="assetsPopover">
+      <p class="mb-2 text-xs font-medium uppercase tracking-wide text-sepia-400">Composição dos ativos</p>
+      <ul class="min-w-56 w-max space-y-2 text-sm">
+        <li v-for="item in assetsBreakdown" :key="item.label" class="grid grid-cols-[1fr_auto] items-baseline gap-x-6">
+          <span class="whitespace-nowrap text-sepia-500">{{ item.label }}</span>
+          <span class="text-right font-mono text-sepia-800">{{ formatBRL(item.value) }}</span>
+        </li>
+      </ul>
+    </Popover>
+
+    <Popover ref="liabilitiesPopover">
+      <p class="mb-2 text-xs font-medium uppercase tracking-wide text-sepia-400">Composição dos passivos</p>
+      <ul class="min-w-56 w-max space-y-2 text-sm">
+        <li v-for="item in liabilitiesBreakdown" :key="item.label" class="grid grid-cols-[1fr_auto] items-baseline gap-x-6">
+          <span class="whitespace-nowrap text-sepia-500">{{ item.label }}</span>
+          <span class="text-right font-mono text-sepia-800">{{ formatBRL(item.value) }}</span>
+        </li>
+      </ul>
+    </Popover>
   </div>
 </template>

@@ -43,7 +43,13 @@ const summaryCards = [
     </div>
 
     <!-- O total: número de maior destaque da página, com contagem e régua dupla. -->
-    <dashboard-net-worth-hero :net-worth="metrics.netBalance" :assets="metrics.assets" :liabilities="metrics.liabilities" :history="netWorthHistory || []" />
+    <dashboard-net-worth-hero
+      :net-worth="metrics.netBalance"
+      :assets="metrics.assets"
+      :liabilities="metrics.liabilities"
+      :history="netWorthHistory || []"
+      :breakdown="metrics.breakdown"
+    />
 
     <!-- Linhas de apoio -->
     <div class="grid grid-cols-1 gap-4 md:grid-cols-3">

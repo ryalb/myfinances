@@ -20,6 +20,7 @@ from apps.finance.consolidation import (
     previous_month_keys,
 )
 from apps.finance.models import (
+    Account,
     Card,
     Investment,
     InvestmentPosition,
@@ -314,3 +315,20 @@ def test_small_collections_stay_unpaginated(api, connection, account):
         response = api.get(path)
         assert response.status_code == 200
         assert isinstance(response.data, list), f"{path} passou a vir paginado"
+
+
+@pytest.mark.django_db
+def test_accounts_do_not_n_plus_one_on_institution(api, connection):
+    """`AccountSerializer` expoe `connection.institution.name` (fallback de nome
+    na tela de contas) -- mesmo risco de N+1 de `SyncJobSerializer`."""
+    for i in range(10):
+        Account.objects.create(
+            connection=connection, external_id=f"acc-{i}", name="Conta Corrente"
+        )
+
+    with CaptureQueriesContext(db_connection) as ctx:
+        response = api.get("/api/v1/accounts/")
+
+    assert response.status_code == 200
+    assert len(response.data) == 10
+    assert len(ctx) <= 3, f"N+1 ao resolver institution: {len(ctx)} queries para 10 contas"
