@@ -46,9 +46,8 @@ export function usePortfolioRisk() {
     { default: () => EMPTY },
   )
 
-  // Mesmo formato `{key, label, value, percentage}` que `CompositionBar` ja usa
-  // pela composicao por categoria (`useInvestments.compositionSegments`) --
-  // reaproveita o componente em vez de duplicar a barra/legenda para cada risco.
+  // Formato `{key, label, value, percentage}` consumido pelos graficos de rosca
+  // da tela de investimentos (`DonutChart`).
   const toSegments = (rows: PortfolioConcentrationRow[]) =>
     rows.map((row) => ({
       key: row.key,

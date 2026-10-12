@@ -43,10 +43,15 @@ export type InvestmentRow = {
   position: InvestmentPosition | null
   marketValue: number
   lastMonthRate: number | null
+  threeMonthRate: number | null
   lastTwelveMonthsRate: number | null
   annualRate: number | null
   amountProfit: number | null
   amountOriginal: number | null
+  purchaseDate: string | null
+  heldDays: number | null
+  sincePurchaseRate: number | null
+  sincePurchaseAnnualRate: number | null
 }
 
 export type InvestmentGroup = {
@@ -67,14 +72,41 @@ const toNumber = (v: string | null | undefined): number | null => {
   return Number.isFinite(n) ? n : null
 }
 
-export function useInvestments() {
-  const { get } = useApi()
+// Ordem fixa em vez de alfabetica: renda fixa e acoes primeiro (o que a
+// maioria das carteiras concentra), especulativo/ambiguo por ultimo.
+const CATEGORY_ORDER = [
+  'fixed_income',
+  'equity_br',
+  'fii',
+  'equity_intl',
+  'etf',
+  'mutual_fund',
+  'coe',
+  'other',
+]
 
-  const { data: investments, refresh: refreshInvestments } = useAsyncData<Investment[]>(
+export const compareCategoryKeys = (a: string, b: string): number => {
+  const orderA = CATEGORY_ORDER.indexOf(a)
+  const orderB = CATEGORY_ORDER.indexOf(b)
+  return (orderA === -1 ? CATEGORY_ORDER.length : orderA) - (orderB === -1 ? CATEGORY_ORDER.length : orderB)
+}
+
+// So a lista de ativos, sem posicoes: o menu lateral usa para montar o
+// submenu de categorias. Mesma chave de cache que `useInvestments`, entao as
+// duas telas compartilham a mesma requisicao.
+export function useInvestmentList() {
+  const { get } = useApi()
+  return useAsyncData<Investment[]>(
     'investments',
     async () => (await get<Investment[]>('/investments/')) || [],
     { default: () => [] },
   )
+}
+
+export function useInvestments() {
+  const { get } = useApi()
+
+  const { data: investments, refresh: refreshInvestments } = useInvestmentList()
 
   const { data: positions, refresh: refreshPositions } = useAsyncData<InvestmentPosition[]>(
     'investment-positions',
@@ -170,12 +202,35 @@ export function useInvestments() {
 
       let lastMonthRate = toNumber(position?.last_month_rate ?? null)
       let lastTwelveMonthsRate = toNumber(position?.last_twelve_months_rate ?? null)
+      // A Pluggy nao tem campo de 3 meses: sempre estimado pelo historico local.
+      let threeMonthRate: number | null = null
       if (position && quantity !== null) {
         if (lastMonthRate === null) {
           lastMonthRate = estimateRate(investment.id, position.as_of_date, quantity, marketValue, 30, 7)
         }
+        threeMonthRate = estimateRate(investment.id, position.as_of_date, quantity, marketValue, 91, 10)
         if (lastTwelveMonthsRate === null) {
           lastTwelveMonthsRate = estimateRate(investment.id, position.as_of_date, quantity, marketValue, 365, 20)
+        }
+      }
+
+      // Rendimento desde a compra: unica janela disponivel para quem ainda nao
+      // tem historico local longo (renda fixa costuma trazer `purchase_date` e
+      // valor aplicado). Anualizado so a partir de 30 dias -- abaixo disso a
+      // extrapolacao para 1 ano amplifica ruido de marcacao a mercado.
+      const purchaseDate = position?.purchase_date || null
+      let heldDays: number | null = null
+      let sincePurchaseRate: number | null = null
+      let sincePurchaseAnnualRate: number | null = null
+      if (purchaseDate && position) {
+        heldDays = Math.round(
+          (new Date(position.as_of_date).getTime() - new Date(purchaseDate).getTime()) / MS_PER_DAY,
+        )
+      }
+      if (amountOriginal !== null && amountOriginal > 0 && marketValue > 0) {
+        sincePurchaseRate = (marketValue / amountOriginal - 1) * 100
+        if (heldDays !== null && heldDays >= 30) {
+          sincePurchaseAnnualRate = (Math.pow(marketValue / amountOriginal, 365 / heldDays) - 1) * 100
         }
       }
 
@@ -184,26 +239,18 @@ export function useInvestments() {
         position,
         marketValue,
         lastMonthRate,
+        threeMonthRate,
         lastTwelveMonthsRate,
         annualRate: toNumber(position?.annual_rate ?? null),
         amountProfit,
         amountOriginal,
+        purchaseDate,
+        heldDays,
+        sincePurchaseRate,
+        sincePurchaseAnnualRate,
       }
     })
   })
-
-  // Ordem fixa em vez de alfabetica: renda fixa e acoes primeiro (o que a
-  // maioria das carteiras concentra), especulativo/ambiguo por ultimo.
-  const CATEGORY_ORDER = [
-    'fixed_income',
-    'equity_br',
-    'fii',
-    'equity_intl',
-    'etf',
-    'mutual_fund',
-    'coe',
-    'other',
-  ]
 
   const groups = computed<InvestmentGroup[]>(() => {
     const byCategory = new Map<string, InvestmentGroup>()
@@ -225,27 +272,11 @@ export function useInvestments() {
       group.totalValue += row.marketValue
       group.totalProfit += row.amountProfit || 0
     }
-    return Array.from(byCategory.values()).sort((a, b) => {
-      const orderA = CATEGORY_ORDER.indexOf(a.key)
-      const orderB = CATEGORY_ORDER.indexOf(b.key)
-      return (orderA === -1 ? CATEGORY_ORDER.length : orderA) - (orderB === -1 ? CATEGORY_ORDER.length : orderB)
-    })
+    return Array.from(byCategory.values()).sort((a, b) => compareCategoryKeys(a.key, b.key))
   })
 
   const totalValue = computed(() => rows.value.reduce((sum, row) => sum + row.marketValue, 0))
   const totalProfit = computed(() => rows.value.reduce((sum, row) => sum + (row.amountProfit || 0), 0))
-
-  const compositionSegments = computed(() => {
-    const total = totalValue.value
-    if (total <= 0) return []
-    return groups.value.map((group) => ({
-      key: group.key,
-      label: group.label,
-      estimated: group.estimated,
-      value: group.totalValue,
-      percentage: (group.totalValue / total) * 100,
-    }))
-  })
 
   return {
     investments,
@@ -254,7 +285,6 @@ export function useInvestments() {
     groups,
     totalValue,
     totalProfit,
-    compositionSegments,
     refresh,
   }
 }

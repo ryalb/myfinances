@@ -1,8 +1,8 @@
 set -e
 
 cd backend
-# Sobe Postgres/Redis (e outros servicos do compose) via Podman
-podman compose up -d --force-recreate --remove-orphans
+# Sobe Redis via Podman
+podman compose up -d --force-recreate --remove-orphans redis
 uv sync --group dev
 
 cd ..

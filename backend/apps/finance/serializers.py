@@ -286,6 +286,32 @@ class PortfolioRiskSerializer(serializers.Serializer):
     currency_exposure = PortfolioCurrencyExposureSerializer()
 
 
+class CdiBenchmarkSerializer(serializers.Serializer):
+    as_of = serializers.DateField(allow_null=True)
+    annual_rate = serializers.DecimalField(max_digits=10, decimal_places=4, allow_null=True)
+    m1 = serializers.DecimalField(max_digits=10, decimal_places=4, allow_null=True)
+    m3 = serializers.DecimalField(max_digits=10, decimal_places=4, allow_null=True)
+    m12 = serializers.DecimalField(max_digits=10, decimal_places=4, allow_null=True)
+
+
+class IpcaBenchmarkSerializer(serializers.Serializer):
+    as_of = serializers.DateField(allow_null=True)
+    m1 = serializers.DecimalField(max_digits=10, decimal_places=4, allow_null=True)
+    m3 = serializers.DecimalField(max_digits=10, decimal_places=4, allow_null=True)
+    m12 = serializers.DecimalField(max_digits=10, decimal_places=4, allow_null=True)
+
+
+class CdiSinceSerializer(serializers.Serializer):
+    date = serializers.DateField()
+    value = serializers.DecimalField(max_digits=10, decimal_places=4, allow_null=True)
+
+
+class MarketBenchmarksSerializer(serializers.Serializer):
+    cdi = CdiBenchmarkSerializer()
+    ipca = IpcaBenchmarkSerializer()
+    cdi_since = CdiSinceSerializer(many=True)
+
+
 class CategoryTotalSerializer(serializers.Serializer):
     category = serializers.CharField()
     total = serializers.DecimalField(max_digits=16, decimal_places=2)

@@ -21,6 +21,7 @@ from apps.finance.views import (
     HealthCheckAPIView,
     InvestmentPositionViewSet,
     InvestmentViewSet,
+    MarketBenchmarksAPIView,
     MonthlyCashFlowAPIView,
     MonthlyReviewAPIView,
     NetWorthSnapshotAPIView,
@@ -77,6 +78,11 @@ urlpatterns = [
         "api/v1/portfolio-targets/",
         PortfolioTargetsAPIView.as_view(),
         name="portfolio-targets",
+    ),
+    path(
+        "api/v1/market-benchmarks/",
+        MarketBenchmarksAPIView.as_view(),
+        name="market-benchmarks",
     ),
     path(
         "api/v1/portfolio-risk/",

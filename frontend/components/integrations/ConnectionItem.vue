@@ -110,7 +110,7 @@ const remove = async () => {
         class="!flex !items-center !gap-1.5 !rounded-lg !bg-sepia-900 !px-3 !py-1.5 !text-xs !font-medium !text-white !whitespace-nowrap hover:!bg-sepia-950 disabled:!opacity-50"
         @click="sync"
       >
-        <Icon v-if="syncing" icon="mdi:loading" class="h-3.5 w-3.5 animate-spin" />
+        <AppSpinner v-if="syncing" :size="14" />
         {{ syncing ? 'Sincronizando...' : 'Sincronizar agora' }}
       </Button>
       <Button

@@ -1,14 +1,16 @@
 services:
-  db:
-    image: pgvector/pgvector:0.8.6-pg18-trixie
-    environment:
-      POSTGRES_DB: myfinances
-      POSTGRES_USER: myfinances
-      POSTGRES_PASSWORD: myfinances
-    ports:
-      - "127.0.0.1:5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql
+  # Not needed if backend/.env points POSTGRES_HOST at a Supabase project --
+  # drop this service (or just stop using it) once fully on Supabase Postgres.
+  # db:
+  #   image: pgvector/pgvector:0.8.6-pg18-trixie
+  #   environment:
+  #     POSTGRES_DB: myfinances
+  #     POSTGRES_USER: myfinances
+  #     POSTGRES_PASSWORD: myfinances
+  #   ports:
+  #     - "127.0.0.1:5432:5432"
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql
 
   redis:
     image: redis:8.10.0-alpine3.23

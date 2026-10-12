@@ -1,3 +1,5 @@
+import { usePageLoading } from '@/composables/usePageLoading'
+
 // Envelope do PageNumberPagination do DRF. Só as coleções que crescem sem limite
 // (transações, sync jobs) vêm assim; as listas pequenas seguem como array puro.
 export type Paginated<T> = {
@@ -32,6 +34,7 @@ export function useApi() {
   const token = useCookie<string | null>('access_token')
   const router = useRouter()
   const { logout, refresh } = useAuth()
+  const { trackRead } = usePageLoading()
 
   const getHeaders = (): Record<string, string> => {
     const base: Record<string, string> = {}
@@ -55,7 +58,9 @@ export function useApi() {
   // uma vez antes de deslogar; só desloga se o refresh token também falhar.
   const isUnauthorized = (error: unknown) => (error as { status?: number })?.status === 401
 
-  const get = async <T>(path: string): Promise<T | null> => {
+  const get = <T>(path: string): Promise<T | null> => trackRead(() => getUntracked<T>(path))
+
+  const getUntracked = async <T>(path: string): Promise<T | null> => {
     try {
       return await $fetch<T>(`${config.public.apiBaseUrl}${path}`, { headers: getHeaders() })
     } catch (error) {
@@ -113,7 +118,12 @@ export function useApi() {
 
   // Mesma renovação de token dos endpoints REST, para as queries GraphQL que
   // hoje montam o fetch na mão em cada composable.
-  const graphql = async <T>(query: string, variables?: Record<string, unknown>): Promise<T | null> => {
+  // Todas as chamadas GraphQL do app hoje sao queries (leitura), entao contam
+  // para o spinner de pagina como os GETs.
+  const graphql = <T>(query: string, variables?: Record<string, unknown>): Promise<T | null> =>
+    trackRead(() => graphqlUntracked<T>(query, variables))
+
+  const graphqlUntracked = async <T>(query: string, variables?: Record<string, unknown>): Promise<T | null> => {
     const attempt = () =>
       $fetch<T>(config.public.graphqlEndpoint as string, {
         method: 'POST',

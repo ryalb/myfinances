@@ -66,15 +66,8 @@
                      <svg v-else-if="item.path === '/investments'" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/></svg>
                      <svg v-else-if="item.path === '/pension'" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
                      <svg v-else-if="item.path === '/subscriptions'" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-                     <svg v-else-if="item.path === '/ai-report'" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
                      <svg v-else-if="item.path === '/chat'" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.86 9.86 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
-                     <svg v-else-if="item.path === '/executive-report'" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 17V9m3 8V5m3 12v-4M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
                      <svg v-else-if="item.path === '/rules'" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/></svg>
-                     <svg v-else-if="item.path === '/simulator'" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 13.5l4.5-4.5 4 4L21 4.5M21 4.5h-5.25M21 4.5v5.25M4.5 19.5h15"/></svg>
-                     <svg v-else-if="item.path === '/monthly-review'" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2zm5-5l2 2 4-4"/></svg>
-                     <svg v-else-if="item.path === '/health-score'" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 10-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/></svg>
-                     <svg v-else-if="item.path === '/portfolio-builder'" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z"/><path stroke-linecap="round" stroke-linejoin="round" d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z"/></svg>
-                     <svg v-else-if="item.path === '/optimizer'" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.43.992a7.723 7.723 0 010 .255c-.008.378.137.75.43.99l1.004.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a7.688 7.688 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.28z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
                      <!-- Fallback: sem ele, um item de menu novo sem ícone correspondente
                           não renderiza nada e a falha passa despercebida. -->
                      <svg v-else class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16"/></svg>
@@ -85,7 +78,35 @@
                   >
                     {{ item.name }}
                   </span>
+                  <button
+                    v-if="item.path === '/investments' && investmentCategories.length && (isExpanded || isHovered || isMobileOpen)"
+                    type="button"
+                    class="ml-auto rounded p-0.5 text-sepia-400 hover:text-sepia-100"
+                    :aria-label="investmentsMenuOpen ? 'Recolher categorias' : 'Mostrar categorias'"
+                    :aria-expanded="investmentsMenuOpen"
+                    @click.prevent.stop="investmentsMenuOpen = !investmentsMenuOpen"
+                  >
+                    <Icon :icon="investmentsMenuOpen ? 'mdi:chevron-up' : 'mdi:chevron-down'" class="h-4 w-4" />
+                  </button>
                 </NuxtLink>
+                <ul
+                  v-if="item.path === '/investments' && investmentsMenuOpen && (isExpanded || isHovered || isMobileOpen)"
+                  class="ml-5 mt-1 flex flex-col gap-0.5 border-l border-sepia-800 pl-3"
+                >
+                  <li v-for="category in investmentCategories" :key="category.key">
+                    <NuxtLink
+                      :to="`/investments/${category.key}`"
+                      :class="[
+                        'block rounded-md px-2 py-1.5 text-[13px] transition-colors',
+                        route.path === `/investments/${category.key}`
+                          ? 'bg-sepia-900 text-sepia-50'
+                          : 'text-sepia-400 hover:bg-sepia-900/60 hover:text-sepia-50',
+                      ]"
+                    >
+                      {{ category.label }}
+                    </NuxtLink>
+                  </li>
+                </ul>
               </li>
             </ul>
           </div>
@@ -125,14 +146,37 @@ import { useRoute } from 'vue-router'
 import { useSidebar } from '@/composables/useSidebar'
 import { useCurrentUser } from '@/composables/useCurrentUser'
 import Avatar from 'primevue/avatar'
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { compareCategoryKeys, useInvestmentList } from '@/composables/useInvestments'
 
 const route = useRoute()
 const { isExpanded, isMobileOpen, isHovered } = useSidebar()
 const currentUser = useCurrentUser()
 const avatarLoadFailed = ref(false)
 
-const isActive = (path: string) => route.path === path
+// Prefixo, nao igualdade: `/investments/fii` mantem "Investimentos" ativo.
+const isActive = (path: string) => route.path === path || route.path.startsWith(`${path}/`)
+
+// Submenu de Investimentos: uma entrada por categoria que o usuario de fato
+// tem (mesmas chaves de `display_category` das subpaginas /investments/<chave>).
+const { data: investmentList } = useInvestmentList()
+const investmentCategories = computed(() => {
+  const byKey = new Map<string, string>()
+  for (const investment of investmentList.value || []) {
+    byKey.set(investment.display_category, investment.display_category_label)
+  }
+  return Array.from(byKey, ([key, label]) => ({ key, label })).sort((a, b) => compareCategoryKeys(a.key, b.key))
+})
+
+// Abre sozinho ao entrar em qualquer tela de investimentos; fora delas, so
+// pelo botao, para nao empurrar o resto do menu para baixo.
+const investmentsMenuOpen = ref(isActive('/investments'))
+watch(
+  () => route.path,
+  () => {
+    if (isActive('/investments')) investmentsMenuOpen.value = true
+  },
+)
 
 onMounted(() => {
   currentUser.fetchUser()
@@ -157,14 +201,7 @@ const menuGroups = [
       { name: 'Previdência', path: '/pension' },
       { name: 'Assinaturas', path: '/subscriptions' },
       { name: 'Categorização', path: '/rules' },
-      { name: 'Revisão mensal', path: '/monthly-review' },
-      { name: 'Diagnóstico', path: '/health-score' },
-      { name: 'Construtor de portfólio', path: '/portfolio-builder' },
-      { name: 'Otimizador', path: '/optimizer' },
-      { name: 'Simulador', path: '/simulator' },
-      { name: 'Relatório IA', path: '/ai-report' },
       { name: 'Chat IA', path: '/chat' },
-      { name: 'Relatório executivo', path: '/executive-report' },
     ],
   },
 ]

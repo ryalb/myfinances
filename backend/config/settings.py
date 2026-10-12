@@ -165,6 +165,10 @@ DATABASES = {
         "PASSWORD": os.getenv("POSTGRES_PASSWORD", "myfinances"),
         "HOST": os.getenv("POSTGRES_HOST", "localhost"),
         "PORT": os.getenv("POSTGRES_PORT", "5432"),
+        # Supabase (and most managed Postgres) reject plain connections, so
+        # this defaults to "prefer" for local/Docker Postgres and must be set
+        # to "require" via POSTGRES_SSLMODE for Supabase.
+        "OPTIONS": {"sslmode": os.getenv("POSTGRES_SSLMODE", "prefer")},
     }
 }
 

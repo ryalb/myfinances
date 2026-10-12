@@ -4,6 +4,13 @@ export default defineNuxtConfig({
   css: ["~/assets/css/tailwind.css", "~/assets/css/theme.css", "primeicons/primeicons.css"],
   modules: ["@nuxtjs/tailwindcss", "@pinia/nuxt", "@nuxtjs/apollo"],
   ssr: false,
+  // Web components do ldrs (`<l-quantum>` etc., ver plugins/ldrs.client.ts):
+  // sem isso o Vue tenta resolver a tag como componente e avisa no console.
+  vue: {
+    compilerOptions: {
+      isCustomElement: (tag) => tag.startsWith('l-'),
+    },
+  },
   app: {
     head: {
       link: [

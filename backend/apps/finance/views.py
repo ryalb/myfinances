@@ -26,6 +26,7 @@ from .allocation import (
     serialize_allocation_drift,
     serialize_contribution_plan,
 )
+from .benchmarks import build_market_benchmarks
 from .consolidation import (
     build_monthly_cash_flow,
     build_monthly_cash_flow_for_range,
@@ -90,6 +91,7 @@ from .serializers import (
     FutureProjectionReportSerializer,
     InvestmentPositionSerializer,
     InvestmentSerializer,
+    MarketBenchmarksSerializer,
     MonthlyCashFlowSerializer,
     MonthlyReviewSerializer,
     MonthlyReviewSummarySerializer,
@@ -320,6 +322,38 @@ class PortfolioRiskAPIView(APIView):
             "currency_exposure": build_currency_exposure(request.user),
         }
         return Response(PortfolioRiskSerializer(risk).data)
+
+
+class MarketBenchmarksAPIView(APIView):
+    """CDI e IPCA acumulados em 1, 3 e 12 meses -- a regua com que a tela de
+    investimentos compara cada ativo. Dado publico de mercado (ver
+    `MarketIndexRate`), mas segue o default autenticado da API.
+
+    `?since=2025-03-01,2026-01-08` adiciona o CDI acumulado desde cada data de
+    compra (`cdi_since`) -- datas vem do cliente porque o calculo do rendimento
+    desde a compra ja vive em `useInvestments.ts`.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    MAX_SINCE_DATES = 100
+
+    def get(self, request):
+        raw_since = request.query_params.get("since", "")
+        raw = [part.strip() for part in raw_since.split(",") if part.strip()]
+        if len(raw) > self.MAX_SINCE_DATES:
+            return Response(
+                {"error": f"Envie no máximo {self.MAX_SINCE_DATES} datas em `since`."},
+                status=400,
+            )
+        try:
+            since_dates = [date_type.fromisoformat(part) for part in raw]
+        except ValueError:
+            return Response(
+                {"error": "Datas em `since` devem estar no formato AAAA-MM-DD."}, status=400
+            )
+        benchmarks = build_market_benchmarks(since_dates=since_dates)
+        return Response(MarketBenchmarksSerializer(benchmarks).data)
 
 
 class PensionPlanViewSet(viewsets.ModelViewSet):

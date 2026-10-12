@@ -483,7 +483,8 @@ const isFutureTx = (bookedAt: string) => {
           class="!inline-flex !shrink-0 !items-center !gap-2 !whitespace-nowrap !rounded-lg !border !border-sepia-300 !bg-white !px-3 !py-1.5 !text-xs !font-medium !text-sepia-700 hover:!bg-sepia-50 disabled:!opacity-40"
           @click="syncAllConnections"
         >
-          <Icon :icon="syncingAll ? 'mdi:loading' : 'mdi:refresh'" :class="['h-4 w-4', syncingAll ? 'animate-spin' : '']" />
+          <AppSpinner v-if="syncingAll" :size="16" />
+          <Icon v-else icon="mdi:refresh" class="h-4 w-4" />
           {{ syncingAll ? 'Atualizando...' : 'Atualizar contas' }}
         </Button>
         <div ref="columnsMenuRef" class="relative">

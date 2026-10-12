@@ -31,6 +31,15 @@ MIN_LOOKBACK_DAYS_BY_INDEX = {
     MarketIndexKind.IPCA: 60,
 }
 
+# Historico minimo para comparar rendimento contra CDI/IPCA (ver `benchmarks.py`):
+# 12 meses para as janelas fixas e o periodo desde a compra de cada aplicacao,
+# que em renda fixa costuma ser de anos. 5 anos fica dentro do limite de 10
+# anos por requisicao que o SGS impoe a series diarias. O sync periodico so
+# busca os ultimos 30 dias; enquanto a serie salva nao alcancar essa janela,
+# cada execucao amplia o lookback ate preencher -- sem exigir que alguem
+# lembre de rodar um backfill manual.
+BENCHMARK_HISTORY_DAYS = 5 * 365
+
 
 class MarketDataUnavailable(RuntimeError):
     """Bacen SGS fora do ar, sem rede ou resposta em formato inesperado."""
@@ -127,6 +136,14 @@ def sync_market_index_rates(
     synced: dict[str, int] = {}
     for kind in kinds:
         effective_lookback = max(lookback_days, MIN_LOOKBACK_DAYS_BY_INDEX.get(kind, 0))
+        oldest = (
+            MarketIndexRate.objects.filter(kind=kind)
+            .order_by("reference_date")
+            .values_list("reference_date", flat=True)
+            .first()
+        )
+        if oldest is None or oldest > today - timedelta(days=BENCHMARK_HISTORY_DAYS):
+            effective_lookback = max(effective_lookback, BENCHMARK_HISTORY_DAYS)
         since = today - timedelta(days=effective_lookback)
         rows = client.fetch_series(kind, since)
         _upsert_rows(kind, rows)

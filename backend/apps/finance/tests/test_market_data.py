@@ -12,6 +12,7 @@ import requests
 from django.utils import timezone
 
 from apps.finance.market_data import (
+    BENCHMARK_HISTORY_DAYS,
     MarketDataUnavailable,
     import_market_index_rates_from_file,
     sync_market_index_rates,
@@ -210,3 +211,35 @@ def test_import_from_file_skips_malformed_points(tmp_path):
 
     assert count == 1
 
+
+
+def _sent_since(call) -> date:
+    return datetime.strptime(call["params"]["dataInicial"], "%d/%m/%Y").date()
+
+
+@pytest.mark.django_db
+def test_sync_backfills_benchmark_history_when_series_is_short(fake_sgs):
+    """Comparacao de 12 meses contra o CDI (ver `benchmarks.py`) precisa de
+    `BENCHMARK_HISTORY_DAYS` salvos; enquanto nao houver, o sync amplia o lookback sozinho."""
+    MarketIndexRate.objects.create(
+        kind=MarketIndexKind.CDI,
+        reference_date=timezone.localdate() - timedelta(days=30),
+        value=Decimal("0.05"),
+    )
+
+    sync_market_index_rates(kinds=[MarketIndexKind.CDI], lookback_days=30)
+
+    assert _sent_since(fake_sgs[0]) <= timezone.localdate() - timedelta(days=BENCHMARK_HISTORY_DAYS)
+
+
+@pytest.mark.django_db
+def test_sync_keeps_short_lookback_once_history_is_complete(fake_sgs):
+    MarketIndexRate.objects.create(
+        kind=MarketIndexKind.CDI,
+        reference_date=timezone.localdate() - timedelta(days=BENCHMARK_HISTORY_DAYS + 5),
+        value=Decimal("0.05"),
+    )
+
+    sync_market_index_rates(kinds=[MarketIndexKind.CDI], lookback_days=30)
+
+    assert _sent_since(fake_sgs[0]) == timezone.localdate() - timedelta(days=30)

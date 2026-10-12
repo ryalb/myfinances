@@ -130,7 +130,8 @@ const reconcileNow = async () => {
           :disabled="reconciling"
           @click="reconcileNow"
         >
-          <Icon :icon="reconciling ? 'mdi:loading' : 'mdi:refresh'" :class="['h-4 w-4', reconciling && 'animate-spin']" />
+          <AppSpinner v-if="reconciling" :size="16" />
+          <Icon v-else icon="mdi:refresh" class="h-4 w-4" />
           {{ reconciling ? 'Reconciliando...' : 'Reconciliar agora' }}
         </Button>
         <Button
