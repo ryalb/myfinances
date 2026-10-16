@@ -17,15 +17,15 @@ const _handleLogout = () => {
 </script>
 
 <template>
-  <div class="min-h-screen xl:flex bg-sepia-950">
+  <div class="min-h-screen xl:flex bg-sepia-950 print:min-h-0 print:block print:bg-white">
     <LayoutAppSidebar />
     <LayoutBackdrop />
     <div
-      class="flex-1 min-h-screen bg-sepia-50 text-sepia-900 transition-all duration-300 ease-in-out"
+      class="flex-1 min-h-screen bg-sepia-50 text-sepia-900 transition-all duration-300 ease-in-out print:!ml-0 print:min-h-0 print:bg-white"
       :class="[isExpanded || isHovered ? 'lg:ml-[290px]' : 'lg:ml-[90px]']"
     >
       <LayoutAppHeader />
-      <main class="p-4 mx-auto max-w-(--breakpoint-2xl) md:p-6">
+      <main class="p-4 mx-auto max-w-(--breakpoint-2xl) md:p-6 print:p-0 print:max-w-none">
         <div
           v-if="pageLoading"
           role="status"

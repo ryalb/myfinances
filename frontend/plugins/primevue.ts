@@ -39,8 +39,39 @@ const SepiaAura = definePreset(Aura, {
   },
 })
 
+// Traduções do PrimeVue (calendário, seletores e demais componentes) para pt-BR.
+// Sem isso, o DatePicker mostra meses e dias em inglês.
+const PT_BR_LOCALE = {
+  firstDayOfWeek: 0,
+  dateFormat: "dd/mm/yy",
+  today: "Hoje",
+  clear: "Limpar",
+  weekHeader: "Sem",
+  chooseYear: "Escolher ano",
+  chooseMonth: "Escolher mês",
+  chooseDate: "Escolher data",
+  prevMonth: "Mês anterior",
+  nextMonth: "Próximo mês",
+  prevYear: "Ano anterior",
+  nextYear: "Próximo ano",
+  monthNames: [
+    "janeiro", "fevereiro", "março", "abril", "maio", "junho",
+    "julho", "agosto", "setembro", "outubro", "novembro", "dezembro",
+  ],
+  monthNamesShort: ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"],
+  dayNames: ["domingo", "segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado"],
+  dayNamesShort: ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"],
+  dayNamesMin: ["D", "S", "T", "Q", "Q", "S", "S"],
+  emptyFilterMessage: "Nenhum resultado encontrado",
+  emptySearchMessage: "Nenhum resultado encontrado",
+  emptySelectionMessage: "Nenhum item selecionado",
+  searchMessage: "{0} resultados disponíveis",
+  selectionMessage: "{0} itens selecionados",
+}
+
 export default defineNuxtPlugin((nuxtApp) => {
   nuxtApp.vueApp.use(PrimeVue, {
+    locale: PT_BR_LOCALE,
     theme: {
       preset: SepiaAura,
       options: {

@@ -39,8 +39,15 @@ export default defineNuxtPlugin((nuxtApp) => {
     pageLoading.value = false
   }
 
+  const isLocalOnlyRoute = (route = router.currentRoute.value) =>
+    Boolean(route?.meta?.skipPageLoading)
+
   const scheduleSettle = () => {
     clearTimeout(settleTimer)
+    if (isLocalOnlyRoute()) {
+      finish()
+      return
+    }
     if (!pageLoading.value || waitingForPage || readsInFlight.value > 0) return
     settleTimer = setTimeout(() => {
       if (!waitingForPage && readsInFlight.value === 0) finish()
@@ -55,20 +62,34 @@ export default defineNuxtPlugin((nuxtApp) => {
     maxTimer = setTimeout(finish, MAX_SPINNER_MS)
   }
 
-  maxTimer = setTimeout(finish, MAX_SPINNER_MS)
+  if (isLocalOnlyRoute()) {
+    waitingForPage = false
+    finish()
+  } else {
+    maxTimer = setTimeout(finish, MAX_SPINNER_MS)
+  }
 
   router.beforeEach((to, from) => {
+    if (to.meta?.skipPageLoading) {
+      waitingForPage = false
+      finish()
+      return
+    }
     if (to.path !== from.path) start()
   })
 
-  // Navegacao cancelada/redirecionada pelo middleware tambem cai aqui.
-  nuxtApp.hook('page:loading:end', async () => {
+  const markPageReady = async () => {
     // Deixa o setup da pagina nova rodar e disparar as leituras antes de olhar
     // o contador -- senao ele ainda estaria em zero.
     await nextTick()
     waitingForPage = false
     scheduleSettle()
-  })
+  }
+
+  // Navegacao cancelada/redirecionada pelo middleware tambem cai aqui.
+  nuxtApp.hook('page:loading:end', markPageReady)
+  nuxtApp.hook('page:finish', markPageReady)
+  nuxtApp.hook('app:mounted', markPageReady)
 
   watch(readsInFlight, scheduleSettle)
 })

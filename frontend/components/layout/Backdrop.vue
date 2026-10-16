@@ -1,7 +1,7 @@
 <template>
   <div
     v-if="isMobileOpen"
-    class="fixed inset-0 bg-sepia-900/50 z-9999 lg:hidden"
+    class="fixed inset-0 bg-sepia-900/50 z-9999 lg:hidden print:hidden"
     @click="toggleMobileSidebar"
   />
 </template>
