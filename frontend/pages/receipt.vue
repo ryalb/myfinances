@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import Button from 'primevue/button'
 import Checkbox from 'primevue/checkbox'
 import DatePicker from 'primevue/datepicker'
@@ -38,8 +38,24 @@ const updateSheetScale = () => {
   sheetHeightPx.value = naturalHeight * sheetScale.value
 }
 
+// Cada via tem metade da folha. Se o conteúdo não couber na sua metade (ex.: com
+// a tabela de adiantamentos), reduz a via com `zoom` até caber, para nada ser cortado.
+const fitReceiptCopies = () => {
+  const sheet = sheetEl.value
+  if (!sheet) return
+  sheet.querySelectorAll<HTMLElement>('.receipt-copy').forEach((copy) => {
+    copy.style.setProperty('zoom', '1')
+    const available = copy.clientHeight
+    const natural = copy.scrollHeight
+    if (available > 0 && natural > available) {
+      copy.style.setProperty('zoom', String((available / natural) * 0.98))
+    }
+  })
+}
+
 onMounted(() => {
   updateSheetScale()
+  nextTick(fitReceiptCopies)
   if (typeof ResizeObserver !== 'undefined' && sheetFrame.value) {
     sheetObserver = new ResizeObserver(updateSheetScale)
     sheetObserver.observe(sheetFrame.value)
@@ -54,6 +70,12 @@ onBeforeUnmount(() => {
 type PaymentKind = 'salario' | 'transporte' | 'diaria' | 'adiantamento' | 'decimo_terceiro' | 'ferias' | 'declaracao'
 type ExtraLineType = 'earning' | 'deduction'
 type Gender = 'M' | 'F'
+
+interface AdvanceItem {
+  id: string
+  date: string
+  amount: number | null
+}
 
 const GENDER_OPTIONS: Array<{ label: string, value: Gender }> = [
   { label: 'Feminino', value: 'F' },
@@ -223,6 +245,7 @@ const createDefaultState = () => ({
   workplaceAddress: '',
   notes: '',
   extraItems: [] as ExtraLineItem[],
+  advances: [] as AdvanceItem[],
   kindConfigs: cloneDefaultKindConfigs(),
 })
 
@@ -344,7 +367,16 @@ const totalDeductions = computed(() =>
     .reduce((acc, item) => acc + item.amount, 0),
 )
 
-const netAmount = computed(() => Math.max(0, totalEarnings.value - totalDeductions.value))
+// Total dos adiantamentos já pagos ao(à) funcionário(a), descontados do líquido.
+const totalAdvances = computed(() =>
+  state.advances.reduce((acc, item) => acc + Math.max(0, Number(item.amount) || 0), 0),
+)
+
+// Valor bruto = proventos - descontos extras (antes dos adiantamentos)
+const grossAmount = computed(() => Math.max(0, totalEarnings.value - totalDeductions.value))
+
+// Valor líquido = valor bruto - adiantamentos já pagos
+const netAmount = computed(() => Math.max(0, grossAmount.value - totalAdvances.value))
 
 // Conversor determinístico de valores em BRL para extenso em português (até centenas de milhões)
 const UNITS = ['', 'um', 'dois', 'três', 'quatro', 'cinco', 'seis', 'sete', 'oito', 'nove']
@@ -566,6 +598,50 @@ const renderedDeclarationSegments = computed(() => {
   return segments
 })
 
+const addAdvance = () => {
+  state.advances.push({
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    date: '',
+    amount: null,
+  })
+}
+
+const removeAdvance = (id: string) => {
+  const index = state.advances.findIndex(item => item.id === id)
+  if (index !== -1) {
+    state.advances.splice(index, 1)
+  }
+}
+
+// Datas dos adiantamentos são guardadas como "YYYY-MM-DD". Valores salvos antes
+// dessa correção podem vir como ISO datetime (ex.: "2026-10-14T03:00:00.000Z"),
+// então normalizamos para a data local antes de usar.
+const normalizeAdvanceDate = (value: string): string => {
+  if (!value) return ''
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return toIsoDateString(date)
+}
+
+const parseAdvanceDate = (value: string): Date | null => {
+  const iso = normalizeAdvanceDate(value)
+  if (!iso) return null
+  const [year, month, day] = iso.split('-').map(Number)
+  return new Date(year, month - 1, day)
+}
+
+const formatAdvanceDate = (value: string): string => {
+  const iso = normalizeAdvanceDate(value)
+  if (!iso) return '—'
+  const [year, month, day] = iso.split('-')
+  return `${day}/${month}/${year}`
+}
+
+const setAdvanceDate = (item: AdvanceItem, date: Date | null) => {
+  item.date = date ? toIsoDateString(date) : ''
+}
+
 const addExtraItem = (preset?: { description: string, reference: string, type: ExtraLineType, amount?: number }) => {
   showAdvanced.value = true
   state.extraItems.push({
@@ -680,6 +756,12 @@ watch(
       // Ignora falhas de quota do navegador
     }
   },
+  { deep: true },
+)
+
+watch(
+  state,
+  () => nextTick(fitReceiptCopies),
   { deep: true },
 )
 </script>
@@ -830,6 +912,62 @@ watch(
                   {{ netAmountInWords }}
                 </p>
               </div>
+            </div>
+
+            <!-- Adiantamentos já pagos (informativo, exibido ao lado do valor líquido) -->
+            <div class="rounded-lg border border-sepia-200 bg-sepia-50/70 p-3.5">
+              <div class="mb-2 flex items-center justify-between gap-2">
+                <span class="text-xs font-semibold uppercase tracking-wider text-sepia-700">
+                  Adiantamentos realizados
+                </span>
+                <span class="font-mono text-xs font-semibold text-sepia-900">
+                  Total: {{ formatBRL(totalAdvances) }}
+                </span>
+              </div>
+
+              <div v-if="state.advances.length" class="space-y-2">
+                <div
+                  v-for="item in state.advances"
+                  :key="item.id"
+                  class="grid grid-cols-[1fr_1fr_auto] items-center gap-2"
+                >
+                  <DatePicker
+                    :model-value="parseAdvanceDate(item.date)"
+                    date-format="dd/mm/yy"
+                    show-icon
+                    icon-display="input"
+                    class="w-full"
+                    @update:model-value="(date: Date | null) => setAdvanceDate(item, date)"
+                  />
+                  <InputNumber
+                    v-model="item.amount"
+                    mode="currency"
+                    currency="BRL"
+                    locale="pt-BR"
+                    :min="0"
+                    placeholder="R$ 0,00"
+                    class="w-full font-mono !text-xs"
+                  />
+                  <Button
+                    text
+                    rounded
+                    title="Remover adiantamento"
+                    class="!text-sepia-400 hover:!text-vermelho-600"
+                    @click="removeAdvance(item.id)"
+                  >
+                    <Icon icon="mdi:trash-can-outline" class="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+
+              <Button
+                type="button"
+                class="mt-2 !rounded-md !border !border-sepia-300 !bg-white !px-2.5 !py-1 !text-xs !font-medium !text-sepia-800 hover:!bg-sepia-100"
+                @click="addAdvance"
+              >
+                <Icon icon="mdi:plus" class="mr-1 h-3.5 w-3.5" />
+                Adicionar adiantamento
+              </Button>
             </div>
 
             <!-- Endereço da empregada doméstica -->
@@ -1323,7 +1461,7 @@ watch(
           <template v-for="(copy, idx) in copies" :key="copy.number">
             <!-- VIA DO RECIBO (ocupa exatamente metade útil da folha A4) -->
             <section
-              class="receipt-copy flex flex-1 flex-col justify-between rounded-sm border border-sepia-800/80 p-3.5 sm:p-4"
+              class="receipt-copy flex flex-1 flex-col justify-between rounded-sm border border-sepia-800/80 p-3 sm:p-3.5 min-h-0 overflow-hidden"
             >
               <div class="space-y-2.5">
                 <!-- Topo da Via: Título, Competência, Selo da Via e Quadro de Valor Líquido -->
@@ -1361,6 +1499,9 @@ watch(
                     <span class="ledger-total-rule block font-mono text-base font-bold text-sepia-950">
                       {{ formatBRL(netAmount) }}
                     </span>
+                    <span v-if="totalAdvances > 0" class="mt-0.5 block text-[9px] text-sepia-700">
+                      Adiantamentos: <strong class="font-mono">{{ formatBRL(totalAdvances) }}</strong>
+                    </span>
                   </div>
                 </header>
 
@@ -1395,6 +1536,50 @@ watch(
                       Endereço: {{ state.employeeAddress.trim() || '____________________________________' }}
                     </p>
                   </div>
+                </div>
+
+                <!-- Tabela de Adiantamentos: valor do pagamento, cada adiantamento descontado e o líquido final -->
+                <div v-if="!isDeclarationKind && state.advances.length > 0" class="overflow-hidden rounded border border-sepia-300">
+                  <table class="w-full border-collapse text-[10px]">
+                    <thead>
+                      <tr class="border-b border-sepia-300 bg-sepia-100/80 text-[9px] font-bold uppercase tracking-wider text-sepia-700">
+                        <th class="px-2 py-0.5 text-left">Discriminação</th>
+                        <th class="px-2 py-0.5 text-right">Valor</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr class="border-b border-sepia-200/70">
+                        <td class="px-2 py-0.5 font-medium text-sepia-900">
+                          Valor do pagamento
+                        </td>
+                        <td class="px-2 py-0.5 text-right font-mono font-medium text-sepia-900">
+                          {{ formatBRL(grossAmount) }}
+                        </td>
+                      </tr>
+                      <tr
+                        v-for="item in state.advances"
+                        :key="item.id"
+                        class="border-b border-sepia-200/70"
+                      >
+                        <td class="px-2 py-0.5 font-medium text-vermelho-700">
+                          (−) Adiantamento em {{ formatAdvanceDate(item.date) }}
+                        </td>
+                        <td class="px-2 py-0.5 text-right font-mono font-medium text-vermelho-700">
+                          {{ formatBRL(item.amount) }}
+                        </td>
+                      </tr>
+                    </tbody>
+                    <tfoot>
+                      <tr class="border-t border-sepia-400 bg-sepia-50 font-mono text-[10px] font-semibold">
+                        <td class="px-2 py-0.5 text-sepia-700">
+                          VALOR LÍQUIDO FINAL
+                        </td>
+                        <td class="px-2 py-0.5 text-right text-sepia-900">
+                          {{ formatBRL(netAmount) }}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
                 </div>
 
                 <!-- Tabela de Discriminação de Valores (exibida quando houver acréscimos/descontos extras) -->
@@ -1534,7 +1719,7 @@ watch(
 .a4-sheet {
   width: 210mm;
   height: 297mm;
-  padding: 10mm;
+  padding: 6mm 8mm;
   box-sizing: border-box;
   overflow: hidden;
   transform-origin: top left;
@@ -1555,7 +1740,7 @@ watch(
     transform: none !important;
     width: 210mm;
     height: 297mm;
-    padding: 8mm 10mm;
+    padding: 6mm 8mm;
     margin: 0;
     page-break-after: avoid;
     page-break-inside: avoid;
