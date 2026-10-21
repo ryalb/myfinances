@@ -165,10 +165,15 @@ DATABASES = {
         "PASSWORD": os.getenv("POSTGRES_PASSWORD", "myfinances"),
         "HOST": os.getenv("POSTGRES_HOST", "localhost"),
         "PORT": os.getenv("POSTGRES_PORT", "5432"),
-        # Supabase (and most managed Postgres) reject plain connections, so
-        # this defaults to "prefer" for local/Docker Postgres and must be set
-        # to "require" via POSTGRES_SSLMODE for Supabase.
-        "OPTIONS": {"sslmode": os.getenv("POSTGRES_SSLMODE", "prefer")},
+        # Managed Postgres (Neon, Supabase) rejects plain connections, so this
+        # defaults to "prefer" for local/Docker Postgres and must be set to
+        # "require" via POSTGRES_SSLMODE for Neon.
+        # connect_timeout: sem ele uma conexao que nao recebe resposta do
+        # servidor (visto no Neon) trava o processo para sempre.
+        "OPTIONS": {
+            "sslmode": os.getenv("POSTGRES_SSLMODE", "prefer"),
+            "connect_timeout": int(os.getenv("POSTGRES_CONNECT_TIMEOUT", "10")),
+        },
     }
 }
 

@@ -108,7 +108,7 @@ const DEFAULT_KIND_CONFIGS: Record<PaymentKind, KindWordingConfig> = {
     mainLineLabel: 'Remuneração mensal (jornada parcial)',
     defaultRef: 'jornada parcial, três vezes por semana',
     declarationTemplate:
-      'Declaro que recebi {artigo_empregador} {empregador_tipo} acima {identificado_empregador} a quantia de {valor} ({extenso}), referente à remuneração do mês de {competencia}. O trabalho é realizado na função de {cargo}, em {referencia}.',
+      'Declaro que recebi {artigo_empregador} {empregador_tipo} acima {identificado_empregador}{adiantamentos} a quantia de {valor} ({extenso}), referente à remuneração do mês de {competencia}. O trabalho é realizado na função de {cargo}, em {referencia}.',
   },
   transporte: {
     label: 'Transporte',
@@ -116,7 +116,7 @@ const DEFAULT_KIND_CONFIGS: Record<PaymentKind, KindWordingConfig> = {
     mainLineLabel: 'Auxílio-transporte / Deslocamento',
     defaultRef: '10 dias de deslocamento, considerando 2 passagens diárias no valor de R$ 5,50 cada, totalizando R$ 11,00 por dia',
     declarationTemplate:
-      'Declaro que recebi {artigo_empregador} {empregador_tipo} acima {identificado_empregador} a quantia de {valor} ({extenso}), referente ao auxílio-transporte do mês de {competencia}. O valor corresponde a {referencia}.',
+      'Declaro que recebi {artigo_empregador} {empregador_tipo} acima {identificado_empregador}{adiantamentos} a quantia de {valor} ({extenso}), referente ao auxílio-transporte do mês de {competencia}. O valor corresponde a {referencia}.',
   },
   diaria: {
     label: 'Diária / Eventual',
@@ -124,7 +124,7 @@ const DEFAULT_KIND_CONFIGS: Record<PaymentKind, KindWordingConfig> = {
     mainLineLabel: 'Diárias trabalhadas',
     defaultRef: '1 diária avulsa, sem vínculo de continuidade',
     declarationTemplate:
-      'Declaro que recebi {artigo_empregador} {empregador_tipo} acima {identificado_empregador} a quantia de {valor} ({extenso}), referente ao pagamento de diária(s) do mês de {competencia}. O serviço foi prestado na função de {cargo}, correspondente a {referencia}.',
+      'Declaro que recebi {artigo_empregador} {empregador_tipo} acima {identificado_empregador}{adiantamentos} a quantia de {valor} ({extenso}), referente ao pagamento de diária(s) do mês de {competencia}. O serviço foi prestado na função de {cargo}, correspondente a {referencia}.',
   },
   adiantamento: {
     label: 'Adiantamento (Vale)',
@@ -132,7 +132,7 @@ const DEFAULT_KIND_CONFIGS: Record<PaymentKind, KindWordingConfig> = {
     mainLineLabel: 'Adiantamento salarial (vale)',
     defaultRef: 'adiantamento quinzenal para compensação no fechamento da folha mensal',
     declarationTemplate:
-      'Declaro que recebi {artigo_empregador} {empregador_tipo} acima {identificado_empregador} a quantia de {valor} ({extenso}), referente a {referencia} do mês de {competencia}. O trabalho é realizado na função de {cargo}, em jornada parcial, três vezes por semana.',
+      'Declaro que recebi {artigo_empregador} {empregador_tipo} acima {identificado_empregador}{adiantamentos} a quantia de {valor} ({extenso}), referente a {referencia} do mês de {competencia}. O trabalho é realizado na função de {cargo}, em jornada parcial, três vezes por semana.',
   },
   decimo_terceiro: {
     label: '13º Salário',
@@ -140,7 +140,7 @@ const DEFAULT_KIND_CONFIGS: Record<PaymentKind, KindWordingConfig> = {
     mainLineLabel: 'Gratificação natalina (13º salário)',
     defaultRef: 'parcela / integral do 13º salário proporcional à jornada parcial',
     declarationTemplate:
-      'Declaro que recebi {artigo_empregador} {empregador_tipo} acima {identificado_empregador} a quantia de {valor} ({extenso}), referente ao pagamento de {referencia} na competência de {competencia}. O trabalho é realizado na função de {cargo}, em jornada parcial, três vezes por semana.',
+      'Declaro que recebi {artigo_empregador} {empregador_tipo} acima {identificado_empregador}{adiantamentos} a quantia de {valor} ({extenso}), referente ao pagamento de {referencia} na competência de {competencia}. O trabalho é realizado na função de {cargo}, em jornada parcial, três vezes por semana.',
   },
   ferias: {
     label: 'Férias',
@@ -148,7 +148,7 @@ const DEFAULT_KIND_CONFIGS: Record<PaymentKind, KindWordingConfig> = {
     mainLineLabel: 'Férias + 1/3 constitucional',
     defaultRef: 'remuneração de férias em regime de jornada parcial acrescida do terço constitucional',
     declarationTemplate:
-      'Declaro que recebi {artigo_empregador} {empregador_tipo} acima {identificado_empregador} a quantia de {valor} ({extenso}), referente à {referencia} na competência de {competencia}. O trabalho é realizado na função de {cargo}, em jornada parcial, três vezes por semana.',
+      'Declaro que recebi {artigo_empregador} {empregador_tipo} acima {identificado_empregador}{adiantamentos} a quantia de {valor} ({extenso}), referente à {referencia} na competência de {competencia}. O trabalho é realizado na função de {cargo}, em jornada parcial, três vezes por semana.',
   },
   declaracao: {
     label: 'Declaração pessoal',
@@ -372,6 +372,10 @@ const totalAdvances = computed(() =>
   state.advances.reduce((acc, item) => acc + Math.max(0, Number(item.amount) || 0), 0),
 )
 
+const advancesCountWithValue = computed(() =>
+  state.advances.filter(item => (Number(item.amount) || 0) > 0).length,
+)
+
 // Valor bruto = proventos - descontos extras (antes dos adiantamentos)
 const grossAmount = computed(() => Math.max(0, totalEarnings.value - totalDeductions.value))
 
@@ -581,6 +585,12 @@ const renderedDeclarationSegments = computed(() => {
     '{ao_empregador}': employerIsFemale.value ? 'à' : 'ao',
     '{identificado_empregador}': employerIsFemale.value ? 'identificada' : 'identificado',
     '{inscrito_funcionario}': employeeIsFemale.value ? 'inscrita' : 'inscrito',
+    // Só aparece quando há adiantamentos informados (com valor)
+    '{adiantamentos}': advancesCountWithValue.value === 0
+      ? ''
+      : advancesCountWithValue.value === 1
+        ? ' o adiantamento discriminado neste documento e'
+        : ' os adiantamentos discriminados neste documento e',
   }
 
   const segments: Array<{ text: string, bold: boolean }> = []

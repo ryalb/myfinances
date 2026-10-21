@@ -122,6 +122,8 @@ class TransactionSerializer(serializers.ModelSerializer):
             "type",
             "category",
             "category_is_manual",
+            "suggested_category",
+            "suggested_category_confidence",
             "provider_category",
             "is_internal_transfer",
             "booked_at",

@@ -166,6 +166,10 @@ class Transaction(TimeStampedModel):
     # o proximo sync (a Pluggy reenvia a mesma transacao em updates) ou um
     # "reaplicar regras" recalcularia e apagaria silenciosamente a escolha.
     category_is_manual = models.BooleanField(default=False)
+    # Sugestao da IA para PIX (pelo nome da contraparte). Nao vira `category` sozinha:
+    # so e aplicada quando o usuario aceita.
+    suggested_category = models.CharField(max_length=100, blank=True)
+    suggested_category_confidence = models.FloatField(null=True, blank=True)
     provider_category = models.CharField(max_length=100, blank=True)
     booked_at = models.DateTimeField()
     # Campos crus da Pluggy sem uso hoje na tela, mas uteis para o relatorio de

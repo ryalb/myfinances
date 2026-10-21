@@ -276,6 +276,49 @@ class TransactionViewSet(viewsets.ReadOnlyModelViewSet):
         transaction.save(update_fields=["category", "category_is_manual"])
         return Response(TransactionSerializer(transaction).data)
 
+    @action(detail=False, methods=["post"], url_path="suggest-categories")
+    def suggest_categories(self, request):
+        """Sugere categoria para PIX sem categoria util, pelo nome da contraparte.
+
+        Nao altera `category`: a sugestao fica em `suggested_category` ate o
+        usuario aceitar. `limit` limita chamadas ao modelo local.
+        """
+        from .ai_services import AIServiceUnavailable
+        from .category_suggestions import CategorySuggester, suggest_categories
+
+        try:
+            limit = int(request.data.get("limit", 30))
+        except (TypeError, ValueError):
+            return Response({"error": "limit deve ser um inteiro."}, status=400)
+
+        try:
+            suggester = CategorySuggester()
+            result = suggest_categories(request.user, suggester, limit=limit)
+        except AIServiceUnavailable as exc:
+            logger.warning("Sugestao de categoria indisponivel: %s", exc)
+            return Response({"error": str(exc)}, status=503)
+
+        return Response(
+            {
+                "suggested": result.suggested,
+                "reused": result.reused,
+                "unmatched": result.unmatched,
+                "model_calls": result.calls,
+            }
+        )
+
+    @action(detail=True, methods=["post"], url_path="accept-suggestion")
+    def accept_suggestion(self, request, pk=None):
+        """Aplica a sugestao da IA como categoria manual e cria regra da contraparte."""
+        from .category_suggestions import accept_suggestion
+
+        transaction = self.get_object()
+        if not transaction.suggested_category:
+            return Response({"error": "Esta transação não tem sugestão."}, status=400)
+
+        accept_suggestion(transaction, request.user)
+        return Response(TransactionSerializer(transaction).data)
+
 
 class CardViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = CardSerializer

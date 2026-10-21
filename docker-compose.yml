@@ -1,6 +1,6 @@
 services:
-  # Not needed if backend/.env points POSTGRES_HOST at a Supabase project --
-  # drop this service (or just stop using it) once fully on Supabase Postgres.
+  # Not needed if backend/.env points POSTGRES_HOST at the Neon project --
+  # drop this service (or just stop using it) once fully on Neon.
   # db:
   #   image: pgvector/pgvector:0.8.6-pg18-trixie
   #   environment:
